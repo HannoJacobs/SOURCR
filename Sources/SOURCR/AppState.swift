@@ -243,10 +243,7 @@ final class AppState {
                 "snapshot repo=\(repo.displayName) branch=\(snapshot.branch) changes=\(snapshot.changes.count) untracked=\(snapshot.untracked.count)"
             )
 
-            if diffRepoID == repo.id, let entry = selectedFile {
-                // Only reload open diff when status actually changed.
-                await loadDiffAsync(for: entry, in: repo)
-            }
+            await reconcileOpenDiff(afterRefreshing: repo)
         } catch {
             snapshots[repo.id] = RepoSnapshot(
                 branch: "—",
@@ -258,7 +255,25 @@ final class AppState {
                 statusFingerprint: UUID().uuidString
             )
             AppDiagnostics.error(.git, "refresh failed repo=\(repo.path) error=\(error.localizedDescription)")
+            if diffRepoID == repo.id {
+                clearSelection()
+            }
         }
+    }
+
+    /// Collapse the left pane when the open file is no longer dirty / listed.
+    private func reconcileOpenDiff(afterRefreshing repo: WatchedRepo) async {
+        guard diffRepoID == repo.id, selectedFileID != nil else { return }
+
+        // `selectedFile` resolves against the snapshot we just wrote — nil means
+        // the path left staged/unstaged/untracked (e.g. user reverted the change).
+        guard let entry = selectedFile else {
+            AppDiagnostics.info(.appState, "clearing stale diff selection after refresh repo=\(repo.displayName)")
+            clearSelection()
+            return
+        }
+
+        await loadDiffAsync(for: entry, in: repo)
     }
 
     private func loadDiffAsync(for entry: GitFileEntry, in repo: WatchedRepo) async {

@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.2
+
+- Fixed a stale open-diff state: if you had a file’s diff expanded on the left and then removed that change in the working tree (so the path no longer appears under Changes / Untracked), SOURCR could keep the left pane open with “Select a changed file to view its diff” and leave the owning repo highlighted as if a diff were still active.
+- Root cause: after a successful status refresh, `AppState` only reloaded the open diff when `selectedFile` still resolved against the new snapshot. When the path left the porcelain list, `selectedFile` became `nil`, so neither a reload nor a clear ran — `selectedFileID`, `diffRepoID`, and `isExpanded` stayed set indefinitely.
+- Added `reconcileOpenDiff(afterRefreshing:)` so every snapshot update for the repo that owns the open selection either reloads the still-listed file or calls `clearSelection()`, which collapses the left pane and drops the active-repo highlight.
+- Manual Refresh (force), debounced `.git` FSEvents refreshes, and the background poll all share that reconcile path, so fixing a change outside SOURCR and waiting for auto-refresh or clicking the refresh arrow both close the empty left panel.
+- On a failed refresh for the repo that currently owns the open diff, selection is cleared as well so an error snapshot cannot leave a phantom expanded layout behind.
+- Kept the tool strictly read-only: reconciliation only inspects status / listed files and never stages, checks out, or mutates the working tree.
+- This is a small reliability release focused on selection lifecycle correctness after working-tree changes disappear; the VS Code-style right-column SCM layout from `1.1` is unchanged.
+- Packaging / full-send: bump CFBundle version to `1.2`, ship `SOURCR.dmg` on GitHub release `v1.2`, and reinstall `/Applications/SOURCR.app` with launch-log proof for version/build `1.2`.
+
 ## 1.1
 
 - Rebuilt the menu-bar panel around a VS Code / Cursor workspace layout: Source Control lives in a fixed right-hand column, and selecting a changed file expands a diff pane only to the left so the SCM column never slides sideways under the cursor.
