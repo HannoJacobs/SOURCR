@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.3
+
+- Replaced the placeholder AppIcon lettermark (a bold white “S” on a flat blue squircle) with a purpose-drawn SOURCR mark that reads as Source Control instead of a generic initial.
+- The new icon is a deep indigo rounded square with a white git branch fork (stem, fork curve, side branch, and hollow commit nodes), plus red/green vertical bars that echo the side-by-side diff pane.
+- Tip-node halo accent calls out the current HEAD tip so the glyph still feels “live” at larger Finder sizes without adding text.
+- Regenerated the full `AppIcon.icns` size ladder via `make-icon.swift` (16 through 1024) using Core Graphics / `NSBezierPath` so the mark scales cleanly instead of relying on emoji or system fonts.
+- Menu-bar status item remains the template `arrow.triangle.branch` SF Symbol (correct for monochrome menu-bar chrome); the AppIcon change is the Finder / Applications / Dock-adjacent identity.
+- Kept the product name firmly **SOURCR** in packaging and icon tooling paths (`AppIcon.icns`, `/tmp/SOURCR.iconset`) — no “Sorcerer” branding.
+- No runtime SCM behavior changes in this release; this ships icon + `make-icon.swift` + CFBundle bump only on top of the `1.2` stale-diff fix.
+- Packaging / full-send: bump CFBundle version to `1.3`, ship `SOURCR.dmg` on GitHub release `v1.3`, and reinstall `/Applications/SOURCR.app` with launch-log proof for version/build `1.3`.
+
 ## 1.2
 
 - Fixed a stale open-diff state: if you had a file’s diff expanded on the left and then removed that change in the working tree (so the path no longer appears under Changes / Untracked), SOURCR could keep the left pane open with “Select a changed file to view its diff” and leave the owning repo highlighted as if a diff were still active.
