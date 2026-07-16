@@ -1,0 +1,3 @@
+# SOURCR — Full Send
+
+In this repo, work is not done until the app is installed to `/Applications/SOURCR.app` and launch-log evidence confirms version/build/bundlePath. Never add git-mutating features; SOURCR is read-only.

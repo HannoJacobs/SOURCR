@@ -1,0 +1,30 @@
+name: Build and Release DMG
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build-and-release:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run tests
+        run: swift test
+
+      - name: Create icon
+        run: swift make-icon.swift
+
+      - name: Create DMG
+        env:
+          SOURCR_CODESIGN_MODE: adhoc
+          SOURCR_SPCTL_EXPECT: rejected
+        run: bash create-dmg.sh
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SOURCR-dmg
+          path: SOURCR.dmg
