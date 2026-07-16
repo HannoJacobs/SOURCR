@@ -9,62 +9,65 @@ final class AppState {
     private static let reposKey = "sourcr.watchedRepos"
     private static let diffModeKey = "sourcr.diffViewMode"
     private static let showUnchangedKey = "sourcr.showUnchanged"
+    private static let wordWrapKey = "sourcr.wordWrap"
 
     var repos: [WatchedRepo] = []
     var selectedRepoID: UUID?
     var selectedFileID: String?
     var snapshots: [UUID: RepoSnapshot] = [:]
     var currentDiff: ParsedDiff?
-    var diffViewMode: DiffViewMode = .inline {
+    var cachedSideBySideRows: [SideBySideRow] = []
+    var diffViewMode: DiffViewMode = .sideBySide {
         didSet { UserDefaults.standard.set(diffViewMode.rawValue, forKey: Self.diffModeKey) }
     }
-    var showUnchanged: Bool = false {
-        didSet {
-            UserDefaults.standard.set(showUnchanged, forKey: Self.showUnchangedKey)
-            refreshSelectedRepo()
-        }
+    var wordWrap: Bool = true {
+        didSet { UserDefaults.standard.set(wordWrap, forKey: Self.wordWrapKey) }
     }
+    var diffRepoID: UUID?
+    /// Kept off — unchanged-file sampling was removed from the UI.
+    private let showUnchanged = false
     var isRefreshing = false
     var statusMessage: String?
-    var isExpanded = false
+    var isPanelVisible = false
+    var isExpanded = false {
+        didSet {
+            if isExpanded != oldValue {
+                onPanelLayoutChange?()
+            }
+        }
+    }
+
+    @ObservationIgnored var onPanelClose: (() -> Void)?
+    @ObservationIgnored var onPanelLayoutChange: (() -> Void)?
 
     private var refreshTimer: Timer?
     private var fsSources: [UUID: DispatchSourceFileSystemObject] = [:]
     private var repoFDs: [UUID: Int32] = [:]
-
-    var menuBarIcon: String {
-        let total = repos.compactMap { snapshots[$0.id]?.totalChanges }.reduce(0, +)
-        if total > 0 {
-            return "arrow.triangle.branch"
-        }
-        return "arrow.triangle.branch"
-    }
+    private var fsDebounceTasks: [UUID: Task<Void, Never>] = [:]
+    private var refreshGeneration = 0
 
     var selectedRepo: WatchedRepo? {
         guard let selectedRepoID else { return repos.first }
         return repos.first { $0.id == selectedRepoID }
     }
 
-    var selectedSnapshot: RepoSnapshot {
-        guard let id = selectedRepo?.id else { return .empty }
-        return snapshots[id] ?? .empty
-    }
-
     var selectedFile: GitFileEntry? {
-        guard let selectedFileID else { return nil }
-        let snap = selectedSnapshot
-        return (snap.staged + snap.unstaged + snap.untracked + snap.unchangedSample)
-            .first { $0.id == selectedFileID }
+        guard let selectedFileID, let diffRepoID, let snap = snapshots[diffRepoID] else { return nil }
+        return snap.allListedFiles.first { $0.id == selectedFileID }
     }
 
-    var sideBySideRows: [SideBySideRow] {
-        guard let currentDiff else { return [] }
-        return DiffParser.sideBySideRows(from: currentDiff)
+    var diffRepo: WatchedRepo? {
+        guard let diffRepoID else { return nil }
+        return repos.first { $0.id == diffRepoID }
+    }
+
+    func isFileSelected(repoID: UUID, entry: GitFileEntry) -> Bool {
+        selectedFileID == entry.id && diffRepoID == repoID && isExpanded
     }
 
     init() {
         loadPrefs()
-        refreshAll()
+        refreshAll(force: true)
         startAutoRefresh()
         AppDiagnostics.info(.appState, "AppState initialized repos=\(repos.count)")
     }
@@ -74,11 +77,10 @@ final class AppState {
            let decoded = try? JSONDecoder().decode([WatchedRepo].self, from: data) {
             repos = decoded
         }
-        if let mode = UserDefaults.standard.string(forKey: Self.diffModeKey),
-           let parsed = DiffViewMode(rawValue: mode) {
-            diffViewMode = parsed
-        }
-        showUnchanged = UserDefaults.standard.bool(forKey: Self.showUnchangedKey)
+        // Always start each launch in the preferred defaults: side-by-side + wrap.
+        // (These can still be toggled during a session.)
+        diffViewMode = .sideBySide
+        wordWrap = true
         if selectedRepoID == nil {
             selectedRepoID = repos.first?.id
         }
@@ -92,21 +94,25 @@ final class AppState {
     }
 
     func addRepo(path: String) {
-        do {
-            let root = try GitService.resolveRepoRoot(path)
-            if repos.contains(where: { $0.path == root }) {
-                statusMessage = "Already watching \(URL(fileURLWithPath: root).lastPathComponent)"
-                return
+        Task {
+            do {
+                let root = try await Task.detached(priority: .userInitiated) {
+                    try GitService.resolveRepoRoot(path)
+                }.value
+                if repos.contains(where: { $0.path == root }) {
+                    statusMessage = "Already watching \(URL(fileURLWithPath: root).lastPathComponent)"
+                    return
+                }
+                let repo = WatchedRepo(path: root)
+                repos.append(repo)
+                selectedRepoID = repo.id
+                saveRepos()
+                await refreshRepoAsync(repo, force: true)
+                AppDiagnostics.info(.appState, "added repo path=\(root)")
+            } catch {
+                statusMessage = error.localizedDescription
+                AppDiagnostics.error(.git, "addRepo failed error=\(error.localizedDescription)")
             }
-            let repo = WatchedRepo(path: root)
-            repos.append(repo)
-            selectedRepoID = repo.id
-            saveRepos()
-            refreshRepo(repo)
-            AppDiagnostics.info(.appState, "added repo path=\(root)")
-        } catch {
-            statusMessage = error.localizedDescription
-            AppDiagnostics.error(.git, "addRepo failed error=\(error.localizedDescription)")
         }
     }
 
@@ -115,86 +121,169 @@ final class AppState {
         snapshots.removeValue(forKey: repo.id)
         if selectedRepoID == repo.id {
             selectedRepoID = repos.first?.id
-            selectedFileID = nil
-            currentDiff = nil
-            isExpanded = false
+        }
+        if diffRepoID == repo.id {
+            clearSelection()
         }
         saveRepos()
-        refreshSelectedRepo()
     }
 
     func selectRepo(_ repo: WatchedRepo) {
         selectedRepoID = repo.id
-        selectedFileID = nil
-        currentDiff = nil
-        isExpanded = false
-        refreshRepo(repo)
     }
 
-    func selectFile(_ entry: GitFileEntry) {
+    func moveRepo(from fromIndex: Int, to toIndex: Int) {
+        guard fromIndex != toIndex,
+              repos.indices.contains(fromIndex),
+              toIndex >= 0, toIndex <= repos.count - 1
+        else { return }
+        var updated = repos
+        let item = updated.remove(at: fromIndex)
+        updated.insert(item, at: toIndex)
+        repos = updated
+        saveRepos()
+    }
+
+    func selectFile(_ entry: GitFileEntry, in repo: WatchedRepo) {
+        selectedRepoID = repo.id
+
+        if selectedFileID == entry.id && diffRepoID == repo.id && isExpanded {
+            clearSelection()
+            return
+        }
+
+        if entry.kind == .unchanged {
+            clearSelection()
+            return
+        }
+
         selectedFileID = entry.id
-        isExpanded = entry.kind != .unchanged
-        loadDiff(for: entry)
+        diffRepoID = repo.id
+        isExpanded = true
+        Task { await loadDiffAsync(for: entry, in: repo) }
     }
 
     func clearSelection() {
         selectedFileID = nil
+        diffRepoID = nil
         currentDiff = nil
+        cachedSideBySideRows = []
         isExpanded = false
     }
 
-    func refreshAll() {
-        isRefreshing = true
-        for repo in repos {
-            refreshRepo(repo)
+    func refreshAll(force: Bool = false) {
+        Task { await refreshAllAsync(force: force) }
+    }
+
+    func presentOpenPanel() {
+        // LSUIElement / popover context: first NSOpenPanel is often half-dead
+        // (grayed Favorites sidebar) unless we dismiss the popover, briefly become
+        // a regular app, activate, then restore accessory policy afterward.
+        onPanelClose?()
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            let previousPolicy = NSApp.activationPolicy()
+            NSApp.setActivationPolicy(.regular)
+            NSApp.activate(ignoringOtherApps: true)
+
+            let panel = NSOpenPanel()
+            panel.canChooseFiles = false
+            panel.canChooseDirectories = true
+            panel.allowsMultipleSelection = true
+            panel.canCreateDirectories = false
+            panel.treatsFilePackagesAsDirectories = true
+            panel.message = "Choose one or more git repositories to watch (read-only)"
+            panel.prompt = "Add"
+
+            let response = panel.runModal()
+
+            // Always return to menu-bar accessory so we don't linger in the Dock.
+            NSApp.setActivationPolicy(previousPolicy == .regular ? .regular : .accessory)
+            if previousPolicy != .regular {
+                NSApp.setActivationPolicy(.accessory)
+            }
+
+            guard response == .OK else { return }
+            for url in panel.urls {
+                self.addRepo(path: url.path)
+            }
         }
-        isRefreshing = false
+    }
+
+    // MARK: - Async git
+
+    private func refreshAllAsync(force: Bool) async {
+        isRefreshing = true
+        defer { isRefreshing = false }
+        await withTaskGroup(of: Void.self) { group in
+            for repo in repos {
+                group.addTask { await self.refreshRepoAsync(repo, force: force) }
+            }
+        }
         rewireFileWatchers()
     }
 
-    func refreshSelectedRepo() {
-        guard let repo = selectedRepo else { return }
-        refreshRepo(repo)
-        if let entry = selectedFile {
-            loadDiff(for: entry)
-        }
-    }
+    private func refreshRepoAsync(_ repo: WatchedRepo, force: Bool) async {
+        let path = repo.path
+        let includeUnchanged = showUnchanged
+        let previous = snapshots[repo.id]?.statusFingerprint
 
-    func refreshRepo(_ repo: WatchedRepo) {
         do {
-            let snapshot = try GitService.loadSnapshot(
-                repoPath: repo.path,
-                includeUnchangedSample: showUnchanged
-            )
+            let snapshot = try await Task.detached(priority: .utility) {
+                try GitService.loadSnapshot(repoPath: path, includeUnchangedSample: includeUnchanged)
+            }.value
+
+            if !force, snapshot.statusFingerprint == previous {
+                return
+            }
+
             snapshots[repo.id] = snapshot
             AppDiagnostics.debug(
                 .git,
-                "snapshot repo=\(repo.displayName) branch=\(snapshot.branch) staged=\(snapshot.staged.count) unstaged=\(snapshot.unstaged.count) untracked=\(snapshot.untracked.count)"
+                "snapshot repo=\(repo.displayName) branch=\(snapshot.branch) changes=\(snapshot.changes.count) untracked=\(snapshot.untracked.count)"
             )
+
+            if diffRepoID == repo.id, let entry = selectedFile {
+                // Only reload open diff when status actually changed.
+                await loadDiffAsync(for: entry, in: repo)
+            }
         } catch {
             snapshots[repo.id] = RepoSnapshot(
                 branch: "—",
                 headSHA: "",
-                staged: [],
-                unstaged: [],
+                changes: [],
                 untracked: [],
                 unchangedSample: [],
-                errorMessage: error.localizedDescription
+                errorMessage: error.localizedDescription,
+                statusFingerprint: UUID().uuidString
             )
             AppDiagnostics.error(.git, "refresh failed repo=\(repo.path) error=\(error.localizedDescription)")
         }
     }
 
-    func loadDiff(for entry: GitFileEntry) {
-        guard let repo = selectedRepo else { return }
+    private func loadDiffAsync(for entry: GitFileEntry, in repo: WatchedRepo) async {
         if entry.kind == .unchanged {
             currentDiff = .empty(path: entry.path)
+            cachedSideBySideRows = []
             return
         }
+
+        let path = repo.path
         do {
-            currentDiff = try GitService.loadDiff(repoPath: repo.path, entry: entry)
-            AppDiagnostics.debug(.git, "diff loaded path=\(entry.path) kind=\(entry.kind.rawValue) lines=\(currentDiff?.lines.count ?? 0)")
+            let diff = try await Task.detached(priority: .userInitiated) {
+                try GitService.loadDiff(repoPath: path, entry: entry)
+            }.value
+            let rows = await Task.detached(priority: .userInitiated) {
+                DiffParser.sideBySideRows(from: diff)
+            }.value
+
+            // Drop stale results if selection changed mid-flight.
+            guard selectedFileID == entry.id, diffRepoID == repo.id else { return }
+            currentDiff = diff
+            cachedSideBySideRows = rows
+            AppDiagnostics.debug(.git, "diff loaded path=\(entry.path) lines=\(diff.lines.count)")
         } catch {
+            guard selectedFileID == entry.id, diffRepoID == repo.id else { return }
             currentDiff = ParsedDiff(
                 path: entry.path,
                 lines: [
@@ -203,39 +292,20 @@ final class AppState {
                 isBinary: false,
                 isEmpty: false
             )
+            cachedSideBySideRows = []
             AppDiagnostics.error(.git, "diff failed path=\(entry.path) error=\(error.localizedDescription)")
-        }
-    }
-
-    func presentOpenPanel() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = true
-        panel.message = "Choose one or more git repositories to watch (read-only)"
-        panel.prompt = "Add"
-        guard panel.runModal() == .OK else { return }
-        for url in panel.urls {
-            addRepo(path: url.path)
         }
     }
 
     private func startAutoRefresh() {
         refreshTimer?.invalidate()
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { [weak self] _ in
+        // Slow background poll — FSEvents cover interactive edits; avoid 3s git spam.
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: 12.0, repeats: true) { [weak self] _ in
             guard let self else { return }
             Task { @MainActor in
-                self.refreshAllQuietly()
+                guard self.isPanelVisible else { return }
+                await self.refreshAllAsync(force: false)
             }
-        }
-    }
-
-    private func refreshAllQuietly() {
-        for repo in repos {
-            refreshRepo(repo)
-        }
-        if let entry = selectedFile {
-            loadDiff(for: entry)
         }
     }
 
@@ -245,6 +315,10 @@ final class AppState {
         }
         fsSources.removeAll()
         repoFDs.removeAll()
+        for task in fsDebounceTasks.values {
+            task.cancel()
+        }
+        fsDebounceTasks.removeAll()
 
         for repo in repos {
             let gitDir = (repo.path as NSString).appendingPathComponent(".git")
@@ -253,21 +327,17 @@ final class AppState {
             let source = DispatchSource.makeFileSystemObjectSource(
                 fileDescriptor: fd,
                 eventMask: [.write, .rename, .delete, .attrib, .extend],
-                queue: DispatchQueue.main
+                queue: .main
             )
             let repoID = repo.id
-            let repoPath = repo.path
             source.setEventHandler { [weak self] in
-                Task { @MainActor in
-                    guard let self else { return }
-                    if let live = self.repos.first(where: { $0.id == repoID }) {
-                        self.refreshRepo(live)
-                        if self.selectedRepoID == repoID, let entry = self.selectedFile {
-                            self.loadDiff(for: entry)
-                        }
-                    } else {
-                        _ = repoPath
-                    }
+                guard let self else { return }
+                self.fsDebounceTasks[repoID]?.cancel()
+                self.fsDebounceTasks[repoID] = Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(350))
+                    guard !Task.isCancelled else { return }
+                    guard let live = self.repos.first(where: { $0.id == repoID }) else { return }
+                    await self.refreshRepoAsync(live, force: false)
                 }
             }
             source.setCancelHandler {

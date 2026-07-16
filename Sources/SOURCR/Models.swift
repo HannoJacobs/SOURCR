@@ -1,6 +1,8 @@
 import Foundation
 
 enum GitFileKind: String, Codable, Hashable {
+    /// Combined staged + unstaged working-tree change (shown as one row).
+    case changed
     case staged
     case unstaged
     case untracked
@@ -63,24 +65,30 @@ struct GitFileEntry: Identifiable, Hashable {
 struct RepoSnapshot: Hashable {
     var branch: String
     var headSHA: String
-    var staged: [GitFileEntry]
-    var unstaged: [GitFileEntry]
+    /// Staged + unstaged, deduped by path (preferred UI list).
+    var changes: [GitFileEntry]
     var untracked: [GitFileEntry]
     var unchangedSample: [GitFileEntry]
     var errorMessage: String?
+    /// Fingerprint of porcelain output — skip UI churn when unchanged.
+    var statusFingerprint: String
 
     static let empty = RepoSnapshot(
         branch: "—",
         headSHA: "",
-        staged: [],
-        unstaged: [],
+        changes: [],
         untracked: [],
         unchangedSample: [],
-        errorMessage: nil
+        errorMessage: nil,
+        statusFingerprint: ""
     )
 
     var totalChanges: Int {
-        staged.count + unstaged.count + untracked.count
+        changes.count + untracked.count
+    }
+
+    var allListedFiles: [GitFileEntry] {
+        changes + untracked + unchangedSample
     }
 }
 

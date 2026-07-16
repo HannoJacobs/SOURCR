@@ -1,15 +1,15 @@
+import AppKit
 import SwiftUI
 
 @main
 struct SOURCRApp: App {
     @NSApplicationDelegateAdaptor(SOURCRAppDelegate.self) private var appDelegate
-    @State private var appState = AppState()
 
     var body: some Scene {
-        MenuBarExtra("SOURCR", systemImage: appState.menuBarIcon) {
-            MenuBarView()
-                .environment(appState)
+        // No MenuBarExtra — status item + floating panel are owned by the AppDelegate.
+        // Settings scene keeps the SwiftUI app lifecycle alive for an LSUIElement app.
+        Settings {
+            EmptyView()
         }
-        .menuBarExtraStyle(.window)
     }
 }

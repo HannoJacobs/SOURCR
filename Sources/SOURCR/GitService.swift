@@ -17,8 +17,7 @@ enum GitCommandError: LocalizedError {
     }
 }
 
-/// Strictly read-only git access. Never runs mutating commands
-/// (no checkout, commit, push, add, reset, stash, branch, etc.).
+/// Strictly read-only git access. Never runs mutating commands.
 enum GitService {
     private static let allowedSubcommands: Set<String> = [
         "status", "diff", "show", "rev-parse", "ls-files", "--version"
@@ -30,7 +29,8 @@ enum GitService {
         guard fm.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue else {
             return false
         }
-        return (try? run(in: path, ["rev-parse", "--is-inside-work-tree"]))?.trimmingCharacters(in: .whitespacesAndNewlines) == "true"
+        return (try? run(in: path, ["rev-parse", "--is-inside-work-tree"]))?
+            .trimmingCharacters(in: .whitespacesAndNewlines) == "true"
     }
 
     static func resolveRepoRoot(_ path: String) throws -> String {
@@ -40,46 +40,45 @@ enum GitService {
         return root
     }
 
-    static func loadSnapshot(repoPath: String, includeUnchangedSample: Bool = true) throws -> RepoSnapshot {
-        let root = try resolveRepoRoot(repoPath)
-        let branch = try run(in: root, ["rev-parse", "--abbrev-ref", "HEAD"])
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let headSHA = (try? run(in: root, ["rev-parse", "--short", "HEAD"]))?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-
-        let porcelain = try run(in: root, ["status", "--porcelain=v1", "-uall", "--ignore-submodules=dirty"])
-        let (staged, unstaged, untracked) = parsePorcelain(porcelain)
+    /// Fast snapshot: one `git status -b` call (branch + porcelain).
+    static func loadSnapshot(repoPath: String, includeUnchangedSample: Bool = false) throws -> RepoSnapshot {
+        // `-unormal` avoids walking every file inside untracked dirs (much faster than `-uall`).
+        let status = try run(
+            in: repoPath,
+            ["status", "--porcelain=v1", "-b", "-unormal", "--ignore-submodules=dirty"]
+        )
+        let fingerprint = String(status.hashValue)
+        let (branch, changes, untracked) = parseStatusWithBranch(status)
 
         var unchanged: [GitFileEntry] = []
         if includeUnchangedSample {
-            unchanged = try loadUnchangedSample(repoPath: root, changedPaths: Set(
-                staged.map(\.path) + unstaged.map(\.path) + untracked.map(\.path)
-            ))
+            let changedPaths = Set(changes.map(\.path) + untracked.map(\.path))
+            unchanged = try loadUnchangedSample(repoPath: repoPath, changedPaths: changedPaths)
         }
+
+        let headSHA = (try? run(in: repoPath, ["rev-parse", "--short", "HEAD"]))?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
         return RepoSnapshot(
             branch: branch.isEmpty ? "HEAD" : branch,
             headSHA: headSHA,
-            staged: staged.sorted { $0.path.localizedCaseInsensitiveCompare($1.path) == .orderedAscending },
-            unstaged: unstaged.sorted { $0.path.localizedCaseInsensitiveCompare($1.path) == .orderedAscending },
+            changes: changes.sorted { $0.path.localizedCaseInsensitiveCompare($1.path) == .orderedAscending },
             untracked: untracked.sorted { $0.path.localizedCaseInsensitiveCompare($1.path) == .orderedAscending },
             unchangedSample: unchanged,
-            errorMessage: nil
+            errorMessage: nil,
+            statusFingerprint: fingerprint
         )
     }
 
     static func loadDiff(repoPath: String, entry: GitFileEntry) throws -> ParsedDiff {
-        let root = try resolveRepoRoot(repoPath)
-
         switch entry.kind {
-        case .staged:
-            let text = try run(in: root, ["diff", "--cached", "--no-color", "--", entry.path])
-            return DiffParser.parse(path: entry.path, unifiedDiff: text)
-        case .unstaged:
-            let text = try run(in: root, ["diff", "--no-color", "--", entry.path])
+        case .changed, .staged, .unstaged:
+            // Combined working tree vs HEAD (staged + unstaged in one diff).
+            let text = try run(in: repoPath, ["diff", "HEAD", "--no-color", "--", entry.path])
             return DiffParser.parse(path: entry.path, unifiedDiff: text)
         case .untracked:
-            let contents = (try? String(contentsOfFile: (root as NSString).appendingPathComponent(entry.path), encoding: .utf8)) ?? ""
+            let fullPath = (repoPath as NSString).appendingPathComponent(entry.path)
+            let contents = (try? String(contentsOfFile: fullPath, encoding: .utf8)) ?? ""
             return DiffParser.syntheticAddition(path: entry.path, contents: contents)
         case .unchanged:
             return .empty(path: entry.path)
@@ -101,18 +100,27 @@ enum GitService {
         }
     }
 
-    private static func parsePorcelain(_ output: String) -> ([GitFileEntry], [GitFileEntry], [GitFileEntry]) {
-        var staged: [GitFileEntry] = []
-        var unstaged: [GitFileEntry] = []
+    private static func parseStatusWithBranch(_ output: String) -> (String, [GitFileEntry], [GitFileEntry]) {
+        var branch = "HEAD"
+        var byPath: [String: GitFileEntry] = [:]
         var untracked: [GitFileEntry] = []
 
         for rawLine in output.split(separator: "\n", omittingEmptySubsequences: true) {
             let line = String(rawLine)
-            guard line.count >= 3 else { continue }
+            if line.hasPrefix("## ") {
+                // ## main...origin/main [ahead 1]
+                let rest = String(line.dropFirst(3))
+                let head = rest.split(separator: "...", maxSplits: 1, omittingEmptySubsequences: true).first
+                    ?? rest.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true).first
+                if let head {
+                    branch = String(head)
+                }
+                continue
+            }
 
-            let xy = line.prefix(2)
-            let x = xy.first!
-            let y = xy.dropFirst().first!
+            guard line.count >= 3 else { continue }
+            let x = line[line.startIndex]
+            let y = line[line.index(after: line.startIndex)]
             let rest = String(line.dropFirst(3))
 
             if x == "?" && y == "?" {
@@ -121,27 +129,29 @@ enum GitService {
             }
 
             let (path, oldPath) = parsePath(rest)
+            let code = (y != " " && y != "?") ? y : x
+            let type = changeType(for: code)
 
-            if x != " " && x != "?" {
-                staged.append(GitFileEntry(
+            // One row per path — staged and/or dirty collapsed together.
+            if byPath[path] == nil {
+                byPath[path] = GitFileEntry(
                     path: path,
-                    kind: .staged,
-                    changeType: changeType(for: x),
+                    kind: .changed,
+                    changeType: type == .unknown ? .modified : type,
                     oldPath: oldPath
-                ))
-            }
-
-            if y != " " && y != "?" {
-                unstaged.append(GitFileEntry(
+                )
+            } else if type == .deleted || type == .added {
+                // Prefer more specific markers if we see them later.
+                byPath[path] = GitFileEntry(
                     path: path,
-                    kind: .unstaged,
-                    changeType: changeType(for: y),
+                    kind: .changed,
+                    changeType: type,
                     oldPath: oldPath
-                ))
+                )
             }
         }
 
-        return (staged, unstaged, untracked)
+        return (branch, Array(byPath.values), untracked)
     }
 
     private static func parsePath(_ rest: String) -> (String, String?) {
@@ -172,10 +182,8 @@ enum GitService {
             throw GitCommandError.invalidOutput("Empty git command")
         }
 
-        // Defense in depth: only allow known read-only subcommands.
-        let sub = head.hasPrefix("-") ? head : head
-        if !allowedSubcommands.contains(sub) && !["status", "diff", "show", "rev-parse", "ls-files"].contains(sub) {
-            throw GitCommandError.invalidOutput("Blocked non-readonly git subcommand: \(sub)")
+        if !allowedSubcommands.contains(head) {
+            throw GitCommandError.invalidOutput("Blocked non-readonly git subcommand: \(head)")
         }
 
         let process = Process()
