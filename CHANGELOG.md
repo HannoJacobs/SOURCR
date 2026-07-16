@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.4
+
+- Fixed nested-folder changes not appearing: files inside an entirely-untracked (new) directory were completely missing from the Changes list, and the directory itself rendered as a single broken “new file” diff with no content.
+- Root cause: `GitService.loadSnapshot` ran `git status --porcelain=v1 -unormal`, and `-unormal` collapses a wholly-untracked directory into one `dir/` entry instead of enumerating the files within it. SOURCR then treated that directory path as an untracked “file”, so nested contents never surfaced and the synthetic addition diff had nothing to read.
+- Switched the status probe to `-uall`, which lists every untracked file individually — including arbitrarily deep nested paths like `a/b/c/file.txt` — so each real file shows up as its own row with a proper untracked-addition diff.
+- Git continues to honor `.gitignore` under `-uall`, so ignored trees (e.g. `node_modules`, `.build`) are not walked; the change only expands directories that are genuinely untracked and would be committed.
+- Verified against a freshly created `nest_0/nest_1/…` fixture: all three nested files (`test0.txt`, `nest_0/test1.txt`, `nest_0/nest_1/test2.txt`) now enumerate correctly instead of one directory blob.
+- No change to the read-only guarantee: `GitService` still only runs status/diff/show/rev-parse/ls-files and never stages, checks out, or mutates the working tree.
+- This is a correctness release on top of the `1.3` icon work; the VS Code-style right-column SCM layout and left-expanding diff behavior are unchanged.
+- Packaging / full-send: bump CFBundle version to `1.4`, ship `SOURCR.dmg` on GitHub release `v1.4`, and reinstall `/Applications/SOURCR.app` with launch-log proof for version/build `1.4`.
+
 ## 1.3
 
 - Replaced the placeholder AppIcon lettermark (a bold white “S” on a flat blue squircle) with a purpose-drawn SOURCR mark that reads as Source Control instead of a generic initial.

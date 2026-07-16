@@ -42,10 +42,13 @@ enum GitService {
 
     /// Fast snapshot: one `git status -b` call (branch + porcelain).
     static func loadSnapshot(repoPath: String, includeUnchangedSample: Bool = false) throws -> RepoSnapshot {
-        // `-unormal` avoids walking every file inside untracked dirs (much faster than `-uall`).
+        // `-uall` lists every untracked file individually, including those inside
+        // entirely-untracked (nested) directories. `-unormal` collapses such a dir
+        // into a single `dir/` entry, which then can't produce a real file diff.
+        // Git still honors .gitignore, so ignored trees aren't walked.
         let status = try run(
             in: repoPath,
-            ["status", "--porcelain=v1", "-b", "-unormal", "--ignore-submodules=dirty"]
+            ["status", "--porcelain=v1", "-b", "-uall", "--ignore-submodules=dirty"]
         )
         let fingerprint = String(status.hashValue)
         let (branch, changes, untracked) = parseStatusWithBranch(status)
