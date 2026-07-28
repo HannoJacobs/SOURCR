@@ -15,12 +15,15 @@ Menu bar icon
 ## What it does
 
 - Lives in the menu bar (`LSUIElement`)
-- Watch multiple local git repositories; drag the grip to reorder them
-- Shows combined staged + dirty changes and untracked files on the **current branch**
+- Watch local git repositories for **Diff** and separately for **Actions** (independent lists)
+- **Diff mode:** Shows combined staged + dirty changes and untracked files on the **current branch**
 - Click a file to open a diff to the left (Inline or Side By Side); click again to collapse
-- Defaults to Side By Side + Wrap; both live in Settings (right column only)
+- **Actions mode:** Lists GitHub Actions for Actions-list repos (newest run per workflow name)
+- Click a workflow run to expand job/step detail to the left (same leftward expand as Diff); click again to collapse
+- Mode-specific Settings manage which repos belong to Diff vs Actions
+- Defaults to Side By Side + Wrap; both live in Diff Settings
 - Follows system light / dark appearance
-- Auto-refreshes while the panel is open; pauses when hidden
+- Diff auto-refreshes local git while the panel is open; Actions loads only when you hit Refresh
 
 ## What it never does
 
@@ -29,7 +32,7 @@ Menu bar icon
 - No commit / push / pull
 - No rewrite of working tree state
 
-Read-only by design: `GitService` only allows `status`, `diff`, `show`, `rev-parse`, and `ls-files`.
+Read-only by design: `GitService` only allows `status`, `diff`, `show`, `rev-parse`, `ls-files`, and `remote get-url`. Actions mode uses the `gh` CLI read-only (`run list` / `run view`).
 
 ## Requirements
 
@@ -77,11 +80,13 @@ Launch evidence is written to:
 |---|---|
 | `SOURCRApp` / `SOURCRAppDelegate` | Accessory app + status-item wiring |
 | `StatusPanelController` | Anchored `NSPanel`, outside-click dismiss, leftward expand |
-| `AppState` | Watched repos, snapshots, selection, refresh, reorder |
+| `AppState` | Watched repos, Diff/Actions mode, snapshots, selection, refresh, reorder |
 | `GitService` | Read-only git CLI wrapper |
+| `GitHubActionsService` | Read-only `gh` Actions list/detail + remote URL parse |
 | `DiffParser` | Unified + side-by-side rendering model |
 | `VSCodeSCMView` | Right-column multi-repo SCM + drag reorder |
-| `DiffPane` | Inline & side-by-side views |
+| `ActionsSCMView` | Right-column Actions list (latest run per workflow) |
+| `DiffPane` / `ActionsDetailPane` | Left-expand detail for file diffs or workflow steps |
 | `SettingsPanel` | Viewer controls (right column overlay) |
 
 ## Notes

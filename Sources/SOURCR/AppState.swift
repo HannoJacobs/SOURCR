@@ -6,12 +6,19 @@ import Observation
 @Observable
 @MainActor
 final class AppState {
-    private static let reposKey = "sourcr.watchedRepos"
+    private static let legacyReposKey = "sourcr.watchedRepos"
+    private static let diffReposKey = "sourcr.diffRepos"
+    private static let actionsReposKey = "sourcr.actionsRepos"
     private static let diffModeKey = "sourcr.diffViewMode"
     private static let showUnchangedKey = "sourcr.showUnchanged"
     private static let wordWrapKey = "sourcr.wordWrap"
+    private static let panelModeKey = "sourcr.panelMode"
 
-    var repos: [WatchedRepo] = []
+    /// Local SCM / Diff watch list.
+    var diffRepos: [WatchedRepo] = []
+    /// GitHub Actions watch list (independent of Diff).
+    var actionsRepos: [WatchedRepo] = []
+
     var selectedRepoID: UUID?
     var selectedFileID: String?
     var snapshots: [UUID: RepoSnapshot] = [:]
@@ -37,6 +44,51 @@ final class AppState {
         }
     }
 
+    /// Repos for the currently visible mode.
+    var activeRepos: [WatchedRepo] {
+        switch panelMode {
+        case .diff: return diffRepos
+        case .actions: return actionsRepos
+        }
+    }
+
+    /// Unique repos across both modes (shared identity when the same path is in both).
+    var allUniqueRepos: [WatchedRepo] {
+        var seen = Set<UUID>()
+        return (diffRepos + actionsRepos).filter { seen.insert($0.id).inserted }
+    }
+
+    // MARK: Actions mode
+
+    var panelMode: PanelMode = .diff {
+        didSet {
+            guard panelMode != oldValue else { return }
+            UserDefaults.standard.set(panelMode.rawValue, forKey: Self.panelModeKey)
+            // Pure UI flip — no network. Actions only load via the Refresh button.
+            collapseDetailIfNeeded()
+            clearDiffPayload()
+            clearActionPayload()
+            actionDetailTask?.cancel()
+            actionDetailTask = nil
+            actionDetailGeneration += 1
+            // If a manual Actions refresh is mid-flight, drop it when leaving.
+            if panelMode != .actions {
+                actionsRefreshTask?.cancel()
+                actionsRefreshTask = nil
+                actionsRefreshGeneration += 1
+                if isRefreshingActions {
+                    isRefreshingActions = false
+                }
+            }
+        }
+    }
+
+    var actionsSnapshots: [UUID: RepoActionsSnapshot] = [:]
+    var selectedActionRunID: String?
+    var selectedActionDetail: ActionRunDetail?
+    var isLoadingActionDetail = false
+    var isRefreshingActions = false
+
     @ObservationIgnored var onPanelClose: (() -> Void)?
     @ObservationIgnored var onPanelLayoutChange: (() -> Void)?
 
@@ -44,11 +96,14 @@ final class AppState {
     private var fsSources: [UUID: DispatchSourceFileSystemObject] = [:]
     private var repoFDs: [UUID: Int32] = [:]
     private var fsDebounceTasks: [UUID: Task<Void, Never>] = [:]
-    private var refreshGeneration = 0
+    private var actionDetailGeneration = 0
+    private var actionsRefreshGeneration = 0
+    @ObservationIgnored private var actionsRefreshTask: Task<Void, Never>?
+    @ObservationIgnored private var actionDetailTask: Task<Void, Never>?
 
     var selectedRepo: WatchedRepo? {
-        guard let selectedRepoID else { return repos.first }
-        return repos.first { $0.id == selectedRepoID }
+        guard let selectedRepoID else { return activeRepos.first }
+        return activeRepos.first { $0.id == selectedRepoID } ?? allUniqueRepos.first { $0.id == selectedRepoID }
     }
 
     var selectedFile: GitFileEntry? {
@@ -58,57 +113,118 @@ final class AppState {
 
     var diffRepo: WatchedRepo? {
         guard let diffRepoID else { return nil }
-        return repos.first { $0.id == diffRepoID }
+        return diffRepos.first { $0.id == diffRepoID }
+    }
+
+    var selectedActionRun: ActionRun? {
+        guard let selectedActionRunID else { return nil }
+        for snap in actionsSnapshots.values {
+            if let run = snap.runs.first(where: { $0.id == selectedActionRunID }) {
+                return run
+            }
+        }
+        return selectedActionDetail?.run
+    }
+
+    func repos(for mode: PanelMode) -> [WatchedRepo] {
+        switch mode {
+        case .diff: return diffRepos
+        case .actions: return actionsRepos
+        }
+    }
+
+    private func setRepos(_ repos: [WatchedRepo], for mode: PanelMode) {
+        switch mode {
+        case .diff: diffRepos = repos
+        case .actions: actionsRepos = repos
+        }
     }
 
     func isFileSelected(repoID: UUID, entry: GitFileEntry) -> Bool {
-        selectedFileID == entry.id && diffRepoID == repoID && isExpanded
+        panelMode == .diff && selectedFileID == entry.id && diffRepoID == repoID && isExpanded
+    }
+
+    func isActionRunSelected(_ run: ActionRun) -> Bool {
+        panelMode == .actions && selectedActionRunID == run.id && isExpanded
     }
 
     init() {
         loadPrefs()
         refreshAll(force: true)
         startAutoRefresh()
-        AppDiagnostics.info(.appState, "AppState initialized repos=\(repos.count)")
+        AppDiagnostics.info(
+            .appState,
+            "AppState initialized diffRepos=\(diffRepos.count) actionsRepos=\(actionsRepos.count)"
+        )
     }
 
     func loadPrefs() {
-        if let data = UserDefaults.standard.data(forKey: Self.reposKey),
+        let defaults = UserDefaults.standard
+        if let data = defaults.data(forKey: Self.diffReposKey),
            let decoded = try? JSONDecoder().decode([WatchedRepo].self, from: data) {
-            repos = decoded
+            diffRepos = decoded
         }
+        if let data = defaults.data(forKey: Self.actionsReposKey),
+           let decoded = try? JSONDecoder().decode([WatchedRepo].self, from: data) {
+            actionsRepos = decoded
+        }
+
+        // Migrate pre-split single list once.
+        if diffRepos.isEmpty && actionsRepos.isEmpty,
+           let data = defaults.data(forKey: Self.legacyReposKey),
+           let decoded = try? JSONDecoder().decode([WatchedRepo].self, from: data) {
+            // Diff gets the legacy list; Actions starts empty so repos without
+            // workflows aren't force-watched until the user opts in.
+            diffRepos = decoded
+            saveRepos()
+            AppDiagnostics.info(.appState, "migrated \(decoded.count) legacy repos into Diff list")
+        }
+
         // Always start each launch in the preferred defaults: side-by-side + wrap.
-        // (These can still be toggled during a session.)
         diffViewMode = .sideBySide
         wordWrap = true
+        if let raw = defaults.string(forKey: Self.panelModeKey),
+           let mode = PanelMode(rawValue: raw) {
+            panelMode = mode
+        }
         if selectedRepoID == nil {
-            selectedRepoID = repos.first?.id
+            selectedRepoID = activeRepos.first?.id
         }
     }
 
     func saveRepos() {
-        if let data = try? JSONEncoder().encode(repos) {
-            UserDefaults.standard.set(data, forKey: Self.reposKey)
+        if let data = try? JSONEncoder().encode(diffRepos) {
+            UserDefaults.standard.set(data, forKey: Self.diffReposKey)
+        }
+        if let data = try? JSONEncoder().encode(actionsRepos) {
+            UserDefaults.standard.set(data, forKey: Self.actionsReposKey)
         }
         rewireFileWatchers()
     }
 
-    func addRepo(path: String) {
+    func addRepo(path: String, to mode: PanelMode? = nil) {
+        let target = mode ?? panelMode
         Task {
             do {
                 let root = try await Task.detached(priority: .userInitiated) {
                     try GitService.resolveRepoRoot(path)
                 }.value
-                if repos.contains(where: { $0.path == root }) {
-                    statusMessage = "Already watching \(URL(fileURLWithPath: root).lastPathComponent)"
+                var list = repos(for: target)
+                if list.contains(where: { $0.path == root }) {
+                    statusMessage = "Already in \(target.title): \(URL(fileURLWithPath: root).lastPathComponent)"
                     return
                 }
-                let repo = WatchedRepo(path: root)
-                repos.append(repo)
+                // Reuse the same identity if the other mode already watches this path.
+                let other = target == .diff ? actionsRepos : diffRepos
+                let repo = other.first(where: { $0.path == root }) ?? WatchedRepo(path: root)
+                list.append(repo)
+                setRepos(list, for: target)
                 selectedRepoID = repo.id
                 saveRepos()
-                await refreshRepoAsync(repo, force: true)
-                AppDiagnostics.info(.appState, "added repo path=\(root)")
+                if target == .diff {
+                    await refreshRepoAsync(repo, force: true)
+                }
+                AppDiagnostics.info(.appState, "added repo mode=\(target.rawValue) path=\(root)")
             } catch {
                 statusMessage = error.localizedDescription
                 AppDiagnostics.error(.git, "addRepo failed error=\(error.localizedDescription)")
@@ -116,14 +232,25 @@ final class AppState {
         }
     }
 
-    func removeRepo(_ repo: WatchedRepo) {
-        repos.removeAll { $0.id == repo.id }
-        snapshots.removeValue(forKey: repo.id)
-        if selectedRepoID == repo.id {
-            selectedRepoID = repos.first?.id
+    func removeRepo(_ repo: WatchedRepo, from mode: PanelMode? = nil) {
+        let target = mode ?? panelMode
+        var list = repos(for: target)
+        list.removeAll { $0.id == repo.id }
+        setRepos(list, for: target)
+
+        let stillWatched = allUniqueRepos.contains { $0.id == repo.id }
+        if !stillWatched {
+            snapshots.removeValue(forKey: repo.id)
+            actionsSnapshots.removeValue(forKey: repo.id)
         }
-        if diffRepoID == repo.id {
-            clearSelection()
+        if selectedRepoID == repo.id {
+            selectedRepoID = repos(for: target).first?.id
+        }
+        if target == .diff, diffRepoID == repo.id {
+            clearDiffSelection()
+        }
+        if target == .actions, selectedActionRun?.repoID == repo.id {
+            clearActionSelection()
         }
         saveRepos()
     }
@@ -132,28 +259,40 @@ final class AppState {
         selectedRepoID = repo.id
     }
 
-    func moveRepo(from fromIndex: Int, to toIndex: Int) {
+    /// Single guarded entry point for swapping the Diff ↔ Actions view tree.
+    func setPanelMode(_ mode: PanelMode) {
+        guard mode != panelMode else { return }
+        panelMode = mode
+        if let selectedRepoID,
+           !activeRepos.contains(where: { $0.id == selectedRepoID }) {
+            self.selectedRepoID = activeRepos.first?.id
+        }
+    }
+
+    func moveRepo(from fromIndex: Int, to toIndex: Int, in mode: PanelMode? = nil) {
+        let target = mode ?? panelMode
+        var list = repos(for: target)
         guard fromIndex != toIndex,
-              repos.indices.contains(fromIndex),
-              toIndex >= 0, toIndex <= repos.count - 1
+              list.indices.contains(fromIndex),
+              toIndex >= 0, toIndex <= list.count - 1
         else { return }
-        var updated = repos
-        let item = updated.remove(at: fromIndex)
-        updated.insert(item, at: toIndex)
-        repos = updated
+        let item = list.remove(at: fromIndex)
+        list.insert(item, at: toIndex)
+        setRepos(list, for: target)
         saveRepos()
     }
 
     func selectFile(_ entry: GitFileEntry, in repo: WatchedRepo) {
+        guard panelMode == .diff else { return }
         selectedRepoID = repo.id
 
         if selectedFileID == entry.id && diffRepoID == repo.id && isExpanded {
-            clearSelection()
+            clearDiffSelection()
             return
         }
 
         if entry.kind == .unchanged {
-            clearSelection()
+            clearDiffSelection()
             return
         }
 
@@ -163,19 +302,120 @@ final class AppState {
         Task { await loadDiffAsync(for: entry, in: repo) }
     }
 
+    func selectActionRun(_ run: ActionRun) {
+        guard panelMode == .actions else { return }
+        selectedRepoID = run.repoID
+
+        if selectedActionRunID == run.id && isExpanded {
+            clearActionSelection()
+            return
+        }
+
+        selectedActionRunID = run.id
+        isExpanded = true
+        selectedActionDetail = nil
+        actionDetailTask?.cancel()
+        actionDetailTask = Task { @MainActor in
+            await loadActionDetailAsync(for: run)
+        }
+    }
+
     func clearSelection() {
-        selectedFileID = nil
-        diffRepoID = nil
-        currentDiff = nil
-        cachedSideBySideRows = []
-        isExpanded = false
+        clearDiffSelection()
+        clearActionSelection()
+    }
+
+    func clearDiffSelection() {
+        clearDiffPayload()
+        if panelMode == .diff {
+            collapseDetailIfNeeded()
+        }
+    }
+
+    func clearActionSelection() {
+        actionDetailTask?.cancel()
+        actionDetailTask = nil
+        clearActionPayload()
+        actionDetailGeneration += 1
+        if panelMode == .actions {
+            collapseDetailIfNeeded()
+        }
+    }
+
+    func openSelectedActionOnGitHub() {
+        guard let urlString = selectedActionDetail?.run.url ?? selectedActionRun?.url,
+              let url = URL(string: urlString), !urlString.isEmpty
+        else { return }
+        NSWorkspace.shared.open(url)
     }
 
     func refreshAll(force: Bool = false) {
-        Task { await refreshAllAsync(force: force) }
+        // Diff / git only. Actions are manual via `refreshActions()`.
+        Task { @MainActor in
+            await refreshAllAsync(force: force)
+        }
     }
 
-    func presentOpenPanel() {
+    /// Manual Actions refresh only — no polling, no mode-switch fetch.
+    func refreshActions() {
+        actionsRefreshTask?.cancel()
+        actionsRefreshGeneration += 1
+        let generation = actionsRefreshGeneration
+        actionsRefreshTask = Task { @MainActor in
+            await refreshActionsAllAsync(generation: generation)
+        }
+    }
+
+    private func cancelActionsWork() {
+        actionsRefreshTask?.cancel()
+        actionsRefreshTask = nil
+        actionDetailTask?.cancel()
+        actionDetailTask = nil
+        actionsRefreshGeneration += 1
+        actionDetailGeneration += 1
+        if isRefreshingActions {
+            isRefreshingActions = false
+        }
+        if isLoadingActionDetail {
+            isLoadingActionDetail = false
+        }
+    }
+
+    private func collapseDetailIfNeeded() {
+        if isExpanded {
+            isExpanded = false
+        }
+    }
+
+    private func clearDiffPayload() {
+        if selectedFileID != nil {
+            selectedFileID = nil
+        }
+        if diffRepoID != nil {
+            diffRepoID = nil
+        }
+        if currentDiff != nil {
+            currentDiff = nil
+        }
+        if !cachedSideBySideRows.isEmpty {
+            cachedSideBySideRows = []
+        }
+    }
+
+    private func clearActionPayload() {
+        if selectedActionRunID != nil {
+            selectedActionRunID = nil
+        }
+        if selectedActionDetail != nil {
+            selectedActionDetail = nil
+        }
+        if isLoadingActionDetail {
+            isLoadingActionDetail = false
+        }
+    }
+
+    func presentOpenPanel(for mode: PanelMode? = nil) {
+        let target = mode ?? panelMode
         // LSUIElement / popover context: first NSOpenPanel is often half-dead
         // (grayed Favorites sidebar) unless we dismiss the popover, briefly become
         // a regular app, activate, then restore accessory policy afterward.
@@ -192,7 +432,12 @@ final class AppState {
             panel.allowsMultipleSelection = true
             panel.canCreateDirectories = false
             panel.treatsFilePackagesAsDirectories = true
-            panel.message = "Choose one or more git repositories to watch (read-only)"
+            switch target {
+            case .diff:
+                panel.message = "Choose git repositories for Diff (read-only)"
+            case .actions:
+                panel.message = "Choose git repositories for Actions (GitHub origin)"
+            }
             panel.prompt = "Add"
 
             let response = panel.runModal()
@@ -205,7 +450,7 @@ final class AppState {
 
             guard response == .OK else { return }
             for url in panel.urls {
-                self.addRepo(path: url.path)
+                self.addRepo(path: url.path, to: target)
             }
         }
     }
@@ -216,7 +461,7 @@ final class AppState {
         isRefreshing = true
         defer { isRefreshing = false }
         await withTaskGroup(of: Void.self) { group in
-            for repo in repos {
+            for repo in diffRepos {
                 group.addTask { await self.refreshRepoAsync(repo, force: force) }
             }
         }
@@ -256,20 +501,20 @@ final class AppState {
             )
             AppDiagnostics.error(.git, "refresh failed repo=\(repo.path) error=\(error.localizedDescription)")
             if diffRepoID == repo.id {
-                clearSelection()
+                clearDiffSelection()
             }
         }
     }
 
     /// Collapse the left pane when the open file is no longer dirty / listed.
     private func reconcileOpenDiff(afterRefreshing repo: WatchedRepo) async {
-        guard diffRepoID == repo.id, selectedFileID != nil else { return }
+        guard panelMode == .diff, diffRepoID == repo.id, selectedFileID != nil else { return }
 
         // `selectedFile` resolves against the snapshot we just wrote — nil means
         // the path left staged/unstaged/untracked (e.g. user reverted the change).
         guard let entry = selectedFile else {
             AppDiagnostics.info(.appState, "clearing stale diff selection after refresh repo=\(repo.displayName)")
-            clearSelection()
+            clearDiffSelection()
             return
         }
 
@@ -312,13 +557,121 @@ final class AppState {
         }
     }
 
+    // MARK: - Async Actions
+
+    private func refreshActionsAllAsync(generation: Int) async {
+        guard generation == actionsRefreshGeneration else { return }
+        isRefreshingActions = true
+        defer {
+            if generation == actionsRefreshGeneration {
+                isRefreshingActions = false
+            }
+        }
+
+        await withTaskGroup(of: Void.self) { group in
+            for repo in actionsRepos {
+                group.addTask { @MainActor in
+                    await self.refreshActionsRepoAsync(repo, generation: generation)
+                }
+            }
+        }
+
+        guard !Task.isCancelled, generation == actionsRefreshGeneration, panelMode == .actions else { return }
+
+        if let selected = selectedActionRun {
+            await loadActionDetailAsync(for: selected)
+        }
+    }
+
+    private func refreshActionsRepoAsync(_ repo: WatchedRepo, generation: Int) async {
+        let path = repo.path
+        let repoID = repo.id
+        let previous = actionsSnapshots[repoID] ?? .empty
+
+        do {
+            let remote = try await Task.detached(priority: .utility) {
+                try GitHubActionsService.resolveGitHubRemote(repoPath: path)
+            }.value
+
+            try Task.checkCancellation()
+            guard generation == actionsRefreshGeneration else { return }
+
+            let runs = try await GitHubActionsService.listRuns(remote: remote, repoID: repoID, limit: 20)
+
+            guard !Task.isCancelled, generation == actionsRefreshGeneration else { return }
+
+            actionsSnapshots[repoID] = RepoActionsSnapshot(
+                remote: remote,
+                runs: runs,
+                errorMessage: nil,
+                fetchedAt: Date()
+            )
+            AppDiagnostics.debug(
+                .appState,
+                "actions repo=\(repo.displayName) remote=\(remote.slug) runs=\(runs.count) running=\(runs.filter(\.isRunning).count)"
+            )
+        } catch is CancellationError {
+            return
+        } catch {
+            guard !Task.isCancelled, generation == actionsRefreshGeneration else { return }
+            actionsSnapshots[repoID] = RepoActionsSnapshot(
+                remote: previous.remote,
+                runs: previous.runs,
+                errorMessage: error.localizedDescription,
+                fetchedAt: Date()
+            )
+            AppDiagnostics.error(.appState, "actions refresh failed repo=\(repo.path) error=\(error.localizedDescription)")
+        }
+    }
+
+    private func loadActionDetailAsync(for run: ActionRun) async {
+        guard let repo = actionsRepos.first(where: { $0.id == run.repoID }) else { return }
+        let path = repo.path
+        actionDetailGeneration += 1
+        let generation = actionDetailGeneration
+        isLoadingActionDetail = selectedActionDetail == nil
+        defer {
+            if generation == actionDetailGeneration {
+                isLoadingActionDetail = false
+            }
+        }
+
+        do {
+            let remote = try await Task.detached(priority: .utility) {
+                try GitHubActionsService.resolveGitHubRemote(repoPath: path)
+            }.value
+
+            try Task.checkCancellation()
+            guard generation == actionDetailGeneration, selectedActionRunID == run.id else { return }
+
+            let detail = try await GitHubActionsService.loadRunDetail(remote: remote, run: run)
+
+            guard generation == actionDetailGeneration, selectedActionRunID == run.id else { return }
+            selectedActionDetail = detail
+
+            // Keep list row in sync with live status/conclusion.
+            if var snap = actionsSnapshots[run.repoID] {
+                if let idx = snap.runs.firstIndex(where: { $0.id == run.id }) {
+                    snap.runs[idx] = detail.run
+                    actionsSnapshots[run.repoID] = snap
+                }
+            }
+        } catch is CancellationError {
+            return
+        } catch {
+            guard generation == actionDetailGeneration, selectedActionRunID == run.id else { return }
+            AppDiagnostics.error(.appState, "action detail failed run=\(run.databaseId) error=\(error.localizedDescription)")
+            statusMessage = error.localizedDescription
+        }
+    }
+
     private func startAutoRefresh() {
         refreshTimer?.invalidate()
-        // Slow background poll — FSEvents cover interactive edits; avoid 3s git spam.
+        // Slow background poll for local git only — Actions are manual-refresh.
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 12.0, repeats: true) { [weak self] _ in
             guard let self else { return }
             Task { @MainActor in
-                guard self.isPanelVisible else { return }
+                guard self.isPanelVisible, self.panelMode == .diff else { return }
                 await self.refreshAllAsync(force: false)
             }
         }
@@ -335,7 +688,7 @@ final class AppState {
         }
         fsDebounceTasks.removeAll()
 
-        for repo in repos {
+        for repo in diffRepos {
             let gitDir = (repo.path as NSString).appendingPathComponent(".git")
             let fd = open(gitDir, O_EVTONLY)
             guard fd >= 0 else { continue }
@@ -351,7 +704,7 @@ final class AppState {
                 self.fsDebounceTasks[repoID] = Task { @MainActor in
                     try? await Task.sleep(for: .milliseconds(350))
                     guard !Task.isCancelled else { return }
-                    guard let live = self.repos.first(where: { $0.id == repoID }) else { return }
+                    guard let live = self.diffRepos.first(where: { $0.id == repoID }) else { return }
                     await self.refreshRepoAsync(live, force: false)
                 }
             }

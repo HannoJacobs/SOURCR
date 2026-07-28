@@ -20,7 +20,7 @@ enum GitCommandError: LocalizedError {
 /// Strictly read-only git access. Never runs mutating commands.
 enum GitService {
     private static let allowedSubcommands: Set<String> = [
-        "status", "diff", "show", "rev-parse", "ls-files", "--version"
+        "status", "diff", "show", "rev-parse", "ls-files", "remote", "--version"
     ]
 
     static func isGitRepository(_ path: String) -> Bool {
@@ -38,6 +38,12 @@ enum GitService {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !root.isEmpty else { throw GitCommandError.notAGitRepo(path) }
         return root
+    }
+
+    /// Read-only remote URL lookup (used to resolve GitHub Actions remotes).
+    static func remoteURL(repoPath: String, name: String = "origin") throws -> String {
+        try run(in: repoPath, ["remote", "get-url", name])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Fast snapshot: one `git status -b` call (branch + porcelain).

@@ -11,9 +11,9 @@ private struct RepoFrameKey: PreferenceKey {
 }
 
 /// VS Code–style multi-repo Source Control accordion (right pane).
+/// Top chrome (refresh/add/settings) lives in MenuBarView.
 struct VSCodeSCMView: View {
     @Environment(AppState.self) private var appState
-    var onOpenSettings: () -> Void = {}
 
     // Drag-to-reorder state (mirrors NOTR's pin reordering).
     @State private var draggingRepoID: UUID?
@@ -24,89 +24,79 @@ struct VSCodeSCMView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 8) {
-                    ForEach(Array(appState.repos.enumerated()), id: \.element.id) { index, repo in
-                        RepoAccordion(
-                            repo: repo,
-                            index: index,
-                            isDragging: draggingRepoID == repo.id,
-                            reorderActive: draggingRepoID != nil,
-                            onDragChanged: { idx, value in handleDragChanged(repo: repo, index: idx, value: value) },
-                            onDragEnded: { handleDragEnded() }
-                        )
-                        .background(
-                            GeometryReader { proxy in
-                                Color.clear.preference(
-                                    key: RepoFrameKey.self,
-                                    value: [repo.id: proxy.frame(in: .named("repoList"))]
-                                )
-                            }
-                        )
-                        .opacity(draggingRepoID == repo.id ? 0.3 : 1)
-                        .zIndex(draggingRepoID == repo.id ? 10 : 0)
+            if appState.diffRepos.isEmpty {
+                emptyState
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 8) {
+                        ForEach(Array(appState.diffRepos.enumerated()), id: \.element.id) { index, repo in
+                            RepoAccordion(
+                                repo: repo,
+                                index: index,
+                                isDragging: draggingRepoID == repo.id,
+                                reorderActive: draggingRepoID != nil,
+                                onDragChanged: { idx, value in handleDragChanged(repo: repo, index: idx, value: value) },
+                                onDragEnded: { handleDragEnded() }
+                            )
+                            .background(
+                                GeometryReader { proxy in
+                                    Color.clear.preference(
+                                        key: RepoFrameKey.self,
+                                        value: [repo.id: proxy.frame(in: .named("repoList"))]
+                                    )
+                                }
+                            )
+                            .opacity(draggingRepoID == repo.id ? 0.3 : 1)
+                            .zIndex(draggingRepoID == repo.id ? 10 : 0)
+                        }
+                    }
+                    .padding(.vertical, 6)
+                    .padding(.horizontal, 6)
+                    .coordinateSpace(name: "repoList")
+                    .onPreferenceChange(RepoFrameKey.self) { repoFrames = $0 }
+                    .overlay(alignment: .topLeading) {
+                        if let lineY = insertionLineY {
+                            Capsule()
+                                .fill(Color.accentColor)
+                                .frame(height: 2)
+                                .padding(.horizontal, 10)
+                                .offset(y: lineY)
+                                .allowsHitTesting(false)
+                        }
+                    }
+                    .overlay(alignment: .topLeading) {
+                        dragPreview
                     }
                 }
-                .padding(.vertical, 6)
-                .padding(.horizontal, 6)
-                .coordinateSpace(name: "repoList")
-                .onPreferenceChange(RepoFrameKey.self) { repoFrames = $0 }
-                .overlay(alignment: .topLeading) {
-                    if let lineY = insertionLineY {
-                        Capsule()
-                            .fill(Color.accentColor)
-                            .frame(height: 2)
-                            .padding(.horizontal, 10)
-                            .offset(y: lineY)
-                            .allowsHitTesting(false)
-                    }
-                }
-                .overlay(alignment: .topLeading) {
-                    dragPreview
-                }
+                .scrollDisabled(draggingRepoID != nil)
             }
-            .scrollDisabled(draggingRepoID != nil)
 
-            if let message = appState.statusMessage {
+            if let message = appState.statusMessage, appState.panelMode == .diff {
                 Text(message)
                     .font(.caption2)
                     .foregroundStyle(.orange)
                     .padding(8)
             }
-
-            Divider()
-            HStack(spacing: 6) {
-                HeaderIconButton(
-                    systemName: "arrow.clockwise",
-                    help: "Refresh",
-                    spinning: appState.isRefreshing
-                ) {
-                    appState.refreshAll(force: true)
-                }
-                HeaderIconButton(systemName: "folder.badge.plus", help: "Add Repository") {
-                    appState.presentOpenPanel()
-                }
-                HeaderIconButton(systemName: "gearshape", help: "Settings") {
-                    onOpenSettings()
-                }
-                Spacer()
-                Button {
-                    DispatchQueue.main.async {
-                        NSApplication.shared.terminate(nil)
-                    }
-                } label: {
-                    Text("Quit")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                }
-                .buttonStyle(PressableButtonStyle())
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
         }
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.55))
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 10) {
+            Spacer()
+            Image(systemName: "arrow.triangle.branch")
+                .font(.system(size: 28))
+                .foregroundStyle(.tertiary)
+            Text("No Diff Repositories")
+                .font(.system(size: 13, weight: .semibold))
+            Text("Add repos in Diff Settings — this list is separate from Actions.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 24)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: - Drag reorder
@@ -146,31 +136,28 @@ struct VSCodeSCMView: View {
         }
 
         guard let origin, let slot else { return }
-        // Convert an insertion slot (0...count) into a destination index.
         let target = slot > origin ? slot - 1 : slot
         if target != origin {
-            appState.moveRepo(from: origin, to: target)
+            appState.moveRepo(from: origin, to: target, in: .diff)
         }
     }
 
-    /// Number of repos whose vertical center sits above the pointer.
     private func insertionSlot(forPointerY pointerY: CGFloat) -> Int {
         var slot = 0
-        for (i, repo) in appState.repos.enumerated() {
+        for (i, repo) in appState.diffRepos.enumerated() {
             if let rect = repoFrames[repo.id], pointerY > rect.midY {
                 slot = i + 1
             }
         }
-        return max(0, min(appState.repos.count, slot))
+        return max(0, min(appState.diffRepos.count, slot))
     }
 
-    /// Y offset of the insertion marker; nil when it wouldn't change the order.
     private var insertionLineY: CGFloat? {
         guard let origin = dragOriginIndex, let slot = dragTargetSlot,
               slot != origin, slot != origin + 1
         else { return nil }
 
-        let repos = appState.repos
+        let repos = appState.diffRepos
         if slot <= 0 {
             return (repoFrames[repos[0].id]?.minY ?? 0) - 4
         }
@@ -185,7 +172,7 @@ struct VSCodeSCMView: View {
     @ViewBuilder
     private var dragPreview: some View {
         if let id = draggingRepoID,
-           let repo = appState.repos.first(where: { $0.id == id }),
+           let repo = appState.diffRepos.first(where: { $0.id == id }),
            let rect = repoFrames[id] {
             RepoDragPreview(repo: repo, snap: appState.snapshots[id] ?? .empty)
                 .frame(width: rect.width, height: rect.height)
@@ -284,7 +271,7 @@ private struct RepoAccordion: View {
                 .strokeBorder(Color.primary.opacity(0.18), lineWidth: 1)
         )
         .onAppear {
-            isOpen = snap.totalChanges > 0 || appState.repos.count <= 2
+            isOpen = snap.totalChanges > 0 || appState.diffRepos.count <= 2
         }
     }
 
@@ -366,8 +353,8 @@ private struct RepoAccordion: View {
                 isOpen.toggle()
             }
             Divider()
-            Button("Remove from SOURCR", role: .destructive) {
-                appState.removeRepo(repo)
+            Button("Remove from Diff", role: .destructive) {
+                appState.removeRepo(repo, from: .diff)
             }
         }
     }

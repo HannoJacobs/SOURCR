@@ -9,6 +9,8 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
     private var panel: NSPanel?
     private var hostingView: NSHostingView<AnyView>?
     private var globalClickMonitor: Any?
+    private var pendingPanelResize: Task<Void, Never>?
+    private var panelResizeGeneration = 0
 
     /// Stable screen X of the panel's right edge while visible.
     private var anchoredMaxX: CGFloat?
@@ -67,6 +69,9 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
     }
 
     func hide() {
+        pendingPanelResize?.cancel()
+        pendingPanelResize = nil
+        panelResizeGeneration += 1
         removeOutsideClickMonitor()
         panel?.orderOut(nil)
         anchoredMaxX = nil
@@ -77,11 +82,27 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
     /// Keep the right edge fixed when diff expands/collapses.
     func syncPanelSize() {
         guard isVisible else { return }
-        if anchoredMaxX == nil {
-            anchoredMaxX = preferredAnchorMaxX()
+        panelResizeGeneration += 1
+        let generation = panelResizeGeneration
+        pendingPanelResize?.cancel()
+
+        // `isExpanded` changes inside an Observation mutation. Resizing here
+        // synchronously re-enters NSHostingView/AttributeGraph layout before that
+        // mutation has settled. Coalesce requests and resize on the next actor turn.
+        pendingPanelResize = Task { @MainActor [weak self] in
+            await Task.yield()
+            guard !Task.isCancelled,
+                  let self,
+                  self.isVisible,
+                  self.panelResizeGeneration == generation
+            else { return }
+
+            self.pendingPanelResize = nil
+            if self.anchoredMaxX == nil {
+                self.anchoredMaxX = self.preferredAnchorMaxX()
+            }
+            self.applyFrame()
         }
-        // Resize immediately (no animator) so SwiftUI width and window width never diverge.
-        applyFrame()
     }
 
     private func applyFrame() {
@@ -105,8 +126,12 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
             }
         }
 
-        // contentView auto-fills the window, so only the window frame needs setting.
-        panel.setFrame(NSRect(origin: origin, size: size), display: true)
+        let targetFrame = NSRect(origin: origin, size: size)
+        guard panel.frame != targetFrame else { return }
+
+        // contentView auto-fills the window. AppKit will redraw on its normal pass;
+        // forcing display here would synchronously traverse the SwiftUI hierarchy.
+        panel.setFrame(targetFrame, display: false)
     }
 
     private func preferredAnchorMaxX() -> CGFloat {

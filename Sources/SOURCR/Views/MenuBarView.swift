@@ -15,31 +15,26 @@ struct MenuBarView: View {
     }
 
     private var mainPanel: some View {
-        VStack(spacing: 0) {
-            if appState.repos.isEmpty {
-                if showingSettings {
-                    SettingsPanel(showingSettings: $showingSettings)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    emptyState
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-            } else {
-                // [Diff (fills remaining) | right column (fixed scmWidth)].
-                // The right column hosts either the SCM list or Settings — the diff
-                // pane on the left stays put and live-updates.
-                HStack(spacing: 0) {
-                    if appState.isExpanded {
-                        DiffPane()
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        Divider()
-                    }
-                    rightColumn
-                        .frame(width: SOURCRLayout.scmWidth)
-                        .frame(maxHeight: .infinity)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        HStack(spacing: 0) {
+            if appState.isExpanded {
+                leftDetailPane
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                Divider()
             }
+            rightColumn
+                .frame(width: SOURCRLayout.scmWidth)
+                .frame(maxHeight: .infinity)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    @ViewBuilder
+    private var leftDetailPane: some View {
+        switch appState.panelMode {
+        case .diff:
+            DiffPane()
+        case .actions:
+            ActionsDetailPane()
         }
     }
 
@@ -48,53 +43,64 @@ struct MenuBarView: View {
         if showingSettings {
             SettingsPanel(showingSettings: $showingSettings)
         } else {
-            VSCodeSCMView(onOpenSettings: { showingSettings = true })
+            VStack(spacing: 0) {
+                headerBar
+                Divider()
+                switch appState.panelMode {
+                case .diff:
+                    VSCodeSCMView()
+                case .actions:
+                    ActionsSCMView()
+                }
+                footerQuit
+            }
         }
     }
 
-    private var emptyState: some View {
-        VStack(spacing: 14) {
-            Spacer()
-            Image(systemName: "arrow.triangle.branch")
-                .font(.system(size: 36))
-                .foregroundStyle(.tertiary)
-            Text("No Repositories")
-                .font(.headline)
-            Text("Add git repos to inspect staged and dirty files — read-only.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 28)
-            PressableRow(action: { appState.presentOpenPanel() }) {
-                HStack(spacing: 8) {
-                    Image(systemName: "folder.badge.plus").frame(width: 20)
-                    Text("Add Repository…")
-                    Spacer()
+    /// One compact header: Diff/Actions on the left, mode tools on the right.
+    private var headerBar: some View {
+        HStack(spacing: 8) {
+            PanelModeToggle()
+            Spacer(minLength: 6)
+            switch appState.panelMode {
+            case .diff:
+                HeaderIconButton(
+                    systemName: "arrow.clockwise",
+                    help: "Refresh Diff",
+                    spinning: appState.isRefreshing
+                ) {
+                    appState.refreshAll(force: true)
+                }
+                HeaderIconButton(systemName: "folder.badge.plus", help: "Add Diff Repository") {
+                    appState.presentOpenPanel(for: .diff)
+                }
+                HeaderIconButton(systemName: "gearshape", help: "Diff Settings") {
+                    showingSettings = true
+                }
+            case .actions:
+                HeaderIconButton(
+                    systemName: "arrow.clockwise",
+                    help: "Refresh Actions",
+                    spinning: appState.isRefreshingActions
+                ) {
+                    appState.refreshActions()
+                }
+                HeaderIconButton(systemName: "folder.badge.plus", help: "Add Actions Repository") {
+                    appState.presentOpenPanel(for: .actions)
+                }
+                HeaderIconButton(systemName: "gearshape", help: "Actions Settings") {
+                    showingSettings = true
                 }
             }
-            .padding(.horizontal, 40)
-            Spacer()
-            footerQuit
         }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
     }
 
     private var footerQuit: some View {
         VStack(spacing: 0) {
             Divider()
-            HStack(spacing: 6) {
-                HeaderIconButton(
-                    systemName: "arrow.clockwise",
-                    help: "Refresh",
-                    spinning: appState.isRefreshing
-                ) {
-                    appState.refreshAll(force: true)
-                }
-                HeaderIconButton(systemName: "folder.badge.plus", help: "Add Repository") {
-                    appState.presentOpenPanel()
-                }
-                HeaderIconButton(systemName: "gearshape", help: "Settings") {
-                    showingSettings = true
-                }
+            HStack {
                 Spacer()
                 Button {
                     DispatchQueue.main.async {
@@ -106,6 +112,7 @@ struct MenuBarView: View {
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 3)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(PressableButtonStyle())
             }
@@ -141,6 +148,8 @@ struct HeaderIconButton: View {
                 RoundedRectangle(cornerRadius: 6)
                     .fill(isHovered ? Color.primary.opacity(0.12) : Color.clear)
             )
+            // Clear backgrounds are not hittable on macOS unless shaped.
+            .contentShape(Rectangle())
         }
         .buttonStyle(PressableButtonStyle())
         .help(help)
@@ -151,7 +160,9 @@ struct HeaderIconButton: View {
 struct PressableButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .scaleEffect(configuration.isPressed ? 0.92 : 1.0)
+            // Ensure padded / clear regions of the label remain clickable.
+            .contentShape(Rectangle())
+            // Avoid shrinking the hit target under the cursor on press.
             .opacity(configuration.isPressed ? 0.75 : 1.0)
             .overlay {
                 if configuration.isPressed {
@@ -199,6 +210,36 @@ struct PressableRow<Content: View>: View {
     }
 }
 
+struct PanelModeToggle: View {
+    @Environment(AppState.self) private var appState
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(PanelMode.allCases) { mode in
+                Button {
+                    var transaction = Transaction(animation: nil)
+                    transaction.disablesAnimations = true
+                    withTransaction(transaction) {
+                        appState.setPanelMode(mode)
+                    }
+                } label: {
+                    Text(mode.title)
+                        .font(.system(size: 11, weight: .semibold))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 5)
+                        .background(appState.panelMode == mode ? Color.accentColor.opacity(0.25) : Color.clear)
+                        .clipShape(RoundedRectangle(cornerRadius: 5))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(2)
+        .background(Color.primary.opacity(0.06))
+        .clipShape(RoundedRectangle(cornerRadius: 7))
+    }
+}
+
 struct DiffModePicker: View {
     @Environment(AppState.self) private var appState
 
@@ -212,10 +253,12 @@ struct DiffModePicker: View {
                         .font(.system(size: 10, weight: .medium))
                         .padding(.horizontal, 8)
                         .padding(.vertical, 3)
+                        .frame(maxHeight: .infinity)
                         .background(appState.diffViewMode == mode ? Color.accentColor.opacity(0.25) : Color.clear)
                         .clipShape(RoundedRectangle(cornerRadius: 4))
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(PressableButtonStyle())
+                .buttonStyle(.plain)
             }
         }
         .padding(2)
@@ -250,7 +293,8 @@ struct WrapToggle: View {
                 .padding(.vertical, 3)
                 .background(isOn ? Color.accentColor.opacity(0.25) : Color.clear)
                 .clipShape(RoundedRectangle(cornerRadius: 4))
+                .contentShape(Rectangle())
         }
-        .buttonStyle(PressableButtonStyle())
+        .buttonStyle(.plain)
     }
 }

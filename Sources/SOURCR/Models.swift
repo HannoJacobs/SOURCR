@@ -142,3 +142,194 @@ struct SideBySideRow: Identifiable, Hashable {
     let rightText: String?
     let rightKind: DiffLineKind
 }
+
+// MARK: - Actions (GitHub)
+
+enum PanelMode: String, CaseIterable, Identifiable {
+    case diff
+    case actions
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .diff: return "Diff"
+        case .actions: return "Actions"
+        }
+    }
+}
+
+enum ActionWorkflowKind: String, Hashable {
+    case ci
+    case cd
+    case other
+
+    var badge: String {
+        switch self {
+        case .ci: return "CI"
+        case .cd: return "CD"
+        case .other: return "misc"
+        }
+    }
+
+    static func classify(workflowName: String) -> ActionWorkflowKind {
+        let lower = workflowName.lowercased()
+        if lower.contains("deploy") { return .cd }
+        if lower.contains("ci") || lower.contains("test") || lower.contains("build") { return .ci }
+        return .other
+    }
+}
+
+struct GitHubRemote: Hashable, Codable {
+    var owner: String
+    var name: String
+
+    var slug: String { "\(owner)/\(name)" }
+}
+
+struct ActionRun: Identifiable, Hashable {
+    /// Stable across repos: "\(repoID.uuidString):\(databaseId)"
+    var id: String { "\(repoID.uuidString):\(databaseId)" }
+
+    let databaseId: Int
+    let repoID: UUID
+    let workflowName: String
+    let displayTitle: String
+    let headBranch: String
+    let event: String
+    let status: String
+    let conclusion: String?
+    let createdAt: Date
+    let updatedAt: Date
+    let url: String
+
+    var workflowKind: ActionWorkflowKind {
+        ActionWorkflowKind.classify(workflowName: workflowName)
+    }
+
+    var isRunning: Bool {
+        status == "in_progress" || status == "queued" || status == "requested" || status == "waiting" || status == "pending"
+    }
+
+    var isFailed: Bool {
+        guard !isRunning else { return false }
+        return conclusion == "failure" || conclusion == "timed_out" || conclusion == "startup_failure"
+    }
+
+    var isPassed: Bool {
+        !isRunning && conclusion == "success"
+    }
+
+    var isCancelled: Bool {
+        !isRunning && (conclusion == "cancelled" || conclusion == "skipped")
+    }
+
+    func elapsed(at now: Date = Date()) -> TimeInterval {
+        if isRunning {
+            return max(0, now.timeIntervalSince(createdAt))
+        }
+        return max(0, updatedAt.timeIntervalSince(createdAt))
+    }
+
+    /// Newer run wins (createdAt, then databaseId).
+    func isNewerThan(_ other: ActionRun) -> Bool {
+        if createdAt != other.createdAt { return createdAt > other.createdAt }
+        return databaseId > other.databaseId
+    }
+}
+
+struct ActionStep: Identifiable, Hashable {
+    var id: Int { number }
+    let number: Int
+    let name: String
+    let status: String
+    let conclusion: String?
+    let startedAt: Date?
+    let completedAt: Date?
+
+    var isCompleted: Bool { status == "completed" }
+    var isInProgress: Bool { status == "in_progress" }
+    var isPending: Bool { !isCompleted && !isInProgress }
+
+    var isSuccess: Bool { conclusion == "success" }
+    var isFailure: Bool {
+        conclusion == "failure" || conclusion == "timed_out" || conclusion == "startup_failure"
+    }
+
+    func durationSeconds() -> TimeInterval? {
+        guard let startedAt else { return nil }
+        let end = completedAt ?? Date()
+        return max(0, end.timeIntervalSince(startedAt))
+    }
+}
+
+struct ActionJob: Identifiable, Hashable {
+    let id: Int
+    let name: String
+    let status: String
+    let conclusion: String?
+    let startedAt: Date?
+    let completedAt: Date?
+    let steps: [ActionStep]
+    let url: String?
+}
+
+struct ActionRunDetail: Hashable {
+    let run: ActionRun
+    let jobs: [ActionJob]
+
+    var primaryJob: ActionJob? {
+        if let running = jobs.first(where: { $0.status == "in_progress" }) {
+            return running
+        }
+        if let failed = jobs.first(where: {
+            $0.conclusion == "failure" || $0.conclusion == "timed_out" || $0.conclusion == "startup_failure"
+        }) {
+            return failed
+        }
+        return jobs.first
+    }
+
+    var completedStepCount: Int {
+        jobs.reduce(0) { $0 + $1.steps.filter(\.isCompleted).count }
+    }
+
+    var totalStepCount: Int {
+        jobs.reduce(0) { $0 + $1.steps.count }
+    }
+}
+
+struct RepoActionsSnapshot: Hashable {
+    var remote: GitHubRemote?
+    var runs: [ActionRun]
+    var errorMessage: String?
+    var fetchedAt: Date?
+
+    static let empty = RepoActionsSnapshot(
+        remote: nil,
+        runs: [],
+        errorMessage: nil,
+        fetchedAt: nil
+    )
+
+    /// One entry per workflow name: the newest run only.
+    /// A new in-progress run replaces the previous pass/fail for that workflow.
+    var latestRunsByWorkflow: [ActionRun] {
+        var best: [String: ActionRun] = [:]
+        for run in runs {
+            if let existing = best[run.workflowName], !run.isNewerThan(existing) {
+                continue
+            }
+            best[run.workflowName] = run
+        }
+        return best.values.sorted { a, b in
+            if a.isRunning != b.isRunning { return a.isRunning && !b.isRunning }
+            if a.createdAt != b.createdAt { return a.createdAt > b.createdAt }
+            return a.databaseId > b.databaseId
+        }
+    }
+
+    var runningCount: Int { latestRunsByWorkflow.filter(\.isRunning).count }
+    var failedCount: Int { latestRunsByWorkflow.filter(\.isFailed).count }
+    var passedCount: Int { latestRunsByWorkflow.filter(\.isPassed).count }
+}

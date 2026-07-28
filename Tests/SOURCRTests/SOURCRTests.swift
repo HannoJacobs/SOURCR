@@ -40,10 +40,32 @@ struct DiffParserTests {
     }
 }
 
-struct GitPorcelainTests {
-    @Test func changeLetters() {
-        #expect(GitChangeType.modified.shortLetter == "M")
-        #expect(GitChangeType.added.shortLetter == "A")
-        #expect(GitChangeType.deleted.shortLetter == "D")
+struct GitHubRemoteParseTests {
+    @Test func parsesSSHAliasRemote() {
+        let remote = GitHubActionsService.parseGitHubRemoteURL(
+            "git@github.com-hb:hb-innovation-lab/PPA-Wrapper.git"
+        )
+        #expect(remote?.slug == "hb-innovation-lab/PPA-Wrapper")
+    }
+
+    @Test func parsesHTTPSRemote() {
+        let remote = GitHubActionsService.parseGitHubRemoteURL(
+            "https://github.com/HannoJacobs/SOURCR.git"
+        )
+        #expect(remote?.owner == "HannoJacobs")
+        #expect(remote?.name == "SOURCR")
+    }
+
+    @Test func rejectsNonGitHubRemote() {
+        let remote = GitHubActionsService.parseGitHubRemoteURL(
+            "git@ssh.dev.azure.com:v3/healthbridge/Innovation%20Lab/Practice-Partner-Agent"
+        )
+        #expect(remote == nil)
+    }
+
+    @Test func formatsDurations() {
+        #expect(GitHubActionsService.formatDuration(16) == "16s")
+        #expect(GitHubActionsService.formatDuration(89) == "1m29s")
+        #expect(GitHubActionsService.formatDuration(3614) == "1h00m14s")
     }
 }
