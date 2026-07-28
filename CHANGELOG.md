@@ -3,12 +3,12 @@
 ## 1.5
 
 - Added an Actions mode alongside Diff: a Diff / Actions segmented control sits at the top of the right column so you can flip between local SCM changes and GitHub Actions without leaving the menu-bar panel.
-- Actions reuses the same watched local repos as Diff. For each repo SOURCR resolves `origin` to a GitHub `owner/repo` (including SSH host aliases like `git@github.com-hb:…`) and lists recent workflow runs via the read-only `gh` CLI — no Azure remotes, no mutating Actions APIs.
-- Filter chips (Running / Failed / Passed / All) with live counts let you focus on the long CD jobs that actually matter; CI finishes in minutes, but Root Deploy–style workflows can run for half an hour to an hour.
-- Clicking a run expands a detail pane to the left using the same anchored-panel gesture as Diff (right edge stays pinned to the status item). Re-clicking the selected run collapses it. Runs stay collapsed by default in the list.
+- Diff and Actions keep **separate** watched-repo lists (legacy `sourcr.watchedRepos` migrates into Diff only). Mode-specific Settings add/remove repos for the active mode.
+- For each Actions repo SOURCR resolves `origin` to a GitHub `owner/repo` (including SSH host aliases like `git@github.com-hb:…`) and lists workflow runs via the read-only `gh` CLI — no Azure remotes, no mutating Actions APIs.
+- The Actions list shows only the **latest run per workflow name** (running first). A new in-progress run replaces the prior pass/fail for that workflow, so history does not pile up and status filters are unnecessary.
+- Actions loads only on manual Refresh (no polling / no fetch-on-toggle). Clicking a run expands a detail pane to the left using the same anchored-panel gesture as Diff; re-clicking collapses it.
 - The left Actions pane shows workflow name, branch, event, live elapsed time (ticking while in progress), a step progress bar, and a condensed step list (current window ± neighbors with ellipsis) so 90-step deploy jobs stay readable.
-- Status chrome matches GitHub’s mental model: spinner for in-progress, check for success, x for failure, plus CI/CD/misc badges derived from the workflow name. Failed and passed rows also show compact fail/pass labels next to duration.
-- Auto-refresh polls Actions about every 8s while the panel is open in Actions mode, and reloads the open run’s job/step detail so you can watch a long `Root Deploy Dev` without babysitting the GitHub tab. “Open on GitHub” jumps to the run URL when you need the full log.
+- Status chrome matches GitHub’s mental model: spinner for in-progress, check for success, x for failure, plus CI/CD/misc badges derived from the workflow name. “Open on GitHub” jumps to the run URL when you need the full log.
 - Still strictly read-only: SOURCR never cancels, re-runs, approves, or otherwise mutates workflows. `GitService` only gained a read-only `remote get-url` helper for origin resolution; Actions traffic goes through `gh run list` / `gh run view`.
 - Packaging / local ship: bump CFBundle version to `1.5`, rebuild `SOURCR.dmg`, and reinstall `/Applications/SOURCR.app` with launch-log proof for version/build `1.5`.
 
