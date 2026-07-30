@@ -30,7 +30,7 @@ struct ActionsDetailPane: View {
                             .lineLimit(1)
                     }
                     Spacer(minLength: 8)
-                    Text(GitHubActionsService.formatDuration(run.elapsed(at: context.date)))
+                    Text(GitHubActionsService.formatDuration(headerElapsed(at: context.date)))
                         .font(.system(size: 12, weight: .semibold, design: .monospaced))
                         .foregroundStyle(run.isRunning ? Color.orange : Color.secondary)
                     HeaderIconButton(systemName: "safari", help: "Open on GitHub") {
@@ -47,6 +47,13 @@ struct ActionsDetailPane: View {
             .padding(.vertical, 8)
             .background(Color(nsColor: .windowBackgroundColor))
         }
+    }
+
+    private func headerElapsed(at now: Date) -> TimeInterval {
+        if let detail = appState.selectedActionDetail {
+            return detail.elapsed(at: now)
+        }
+        return appState.selectedActionRun?.elapsed(at: now) ?? 0
     }
 
     @ViewBuilder

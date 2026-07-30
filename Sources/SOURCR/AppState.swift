@@ -13,6 +13,9 @@ final class AppState {
     private static let showUnchangedKey = "sourcr.showUnchanged"
     private static let wordWrapKey = "sourcr.wordWrap"
     private static let panelModeKey = "sourcr.panelMode"
+    private static let panelPinnedKey = "sourcr.panelPinned"
+    private static let diffCollapsedKey = "sourcr.diffCollapsedRepos"
+    private static let actionsCollapsedKey = "sourcr.actionsCollapsedRepos"
 
     /// Local SCM / Diff watch list.
     var diffRepos: [WatchedRepo] = []
@@ -36,12 +39,79 @@ final class AppState {
     var isRefreshing = false
     var statusMessage: String?
     var isPanelVisible = false
+    /// When true, the panel stays open while working in other apps (no auto-dismiss).
+    var isPanelPinned = false {
+        didSet {
+            guard isPanelPinned != oldValue else { return }
+            UserDefaults.standard.set(isPanelPinned, forKey: Self.panelPinnedKey)
+            AppDiagnostics.info(.appState, "panel pin \(isPanelPinned ? "on" : "off")")
+            onPanelPinnedChanged?(isPanelPinned)
+        }
+    }
     var isExpanded = false {
         didSet {
             if isExpanded != oldValue {
                 onPanelLayoutChange?()
             }
         }
+    }
+
+    /// Ideal height of the scrollable right-column body (repo list / settings).
+    /// Drives panel height so collapsed repos don't leave a tall empty panel.
+    var scmBodyHeight: CGFloat = 0 {
+        didSet {
+            guard abs(scmBodyHeight - oldValue) > 0.5 else { return }
+            onPanelLayoutChange?()
+        }
+    }
+
+    /// Window height for the anchored panel (content-fit, capped; taller when detail open).
+    var panelHeight: CGFloat {
+        let body: CGFloat = scmBodyHeight > 1
+            ? min(scmBodyHeight, SOURCRLayout.maxBodyHeight)
+            : SOURCRLayout.emptyBodyHeight
+        let fitted = SOURCRLayout.chromeHeight + body
+        let clamped = min(SOURCRLayout.maxPanelHeight, max(SOURCRLayout.minPanelHeight, fitted))
+        if isExpanded {
+            return max(clamped, SOURCRLayout.minExpandedPanelHeight)
+        }
+        return clamped
+    }
+
+    func reportSCMBodyHeight(_ height: CGFloat) {
+        let next = max(0, height)
+        guard abs(next - scmBodyHeight) > 0.5 else { return }
+        scmBodyHeight = next
+    }
+
+    /// Repo accordion IDs the user has collapsed (default is open).
+    var diffCollapsedRepoIDs: Set<UUID> = [] {
+        didSet { persistCollapsedRepos(diffCollapsedRepoIDs, key: Self.diffCollapsedKey) }
+    }
+    var actionsCollapsedRepoIDs: Set<UUID> = [] {
+        didSet { persistCollapsedRepos(actionsCollapsedRepoIDs, key: Self.actionsCollapsedKey) }
+    }
+
+    func isRepoAccordionOpen(_ repoID: UUID, in mode: PanelMode) -> Bool {
+        switch mode {
+        case .diff: return !diffCollapsedRepoIDs.contains(repoID)
+        case .actions: return !actionsCollapsedRepoIDs.contains(repoID)
+        }
+    }
+
+    func setRepoAccordionOpen(_ repoID: UUID, in mode: PanelMode, open: Bool) {
+        switch mode {
+        case .diff:
+            if open { diffCollapsedRepoIDs.remove(repoID) }
+            else { diffCollapsedRepoIDs.insert(repoID) }
+        case .actions:
+            if open { actionsCollapsedRepoIDs.remove(repoID) }
+            else { actionsCollapsedRepoIDs.insert(repoID) }
+        }
+    }
+
+    func toggleRepoAccordion(_ repoID: UUID, in mode: PanelMode) {
+        setRepoAccordionOpen(repoID, in: mode, open: !isRepoAccordionOpen(repoID, in: mode))
     }
 
     /// Repos for the currently visible mode.
@@ -64,22 +134,14 @@ final class AppState {
         didSet {
             guard panelMode != oldValue else { return }
             UserDefaults.standard.set(panelMode.rawValue, forKey: Self.panelModeKey)
-            // Pure UI flip — no network. Actions only load via the Refresh button.
+            // Pure UI flip — keep any in-flight Actions list poll (pinned Diff can
+            // still watch a long CD). Drop only the detail payload for the other mode.
             collapseDetailIfNeeded()
             clearDiffPayload()
             clearActionPayload()
             actionDetailTask?.cancel()
             actionDetailTask = nil
             actionDetailGeneration += 1
-            // If a manual Actions refresh is mid-flight, drop it when leaving.
-            if panelMode != .actions {
-                actionsRefreshTask?.cancel()
-                actionsRefreshTask = nil
-                actionsRefreshGeneration += 1
-                if isRefreshingActions {
-                    isRefreshingActions = false
-                }
-            }
         }
     }
 
@@ -91,6 +153,8 @@ final class AppState {
 
     @ObservationIgnored var onPanelClose: (() -> Void)?
     @ObservationIgnored var onPanelLayoutChange: (() -> Void)?
+    /// Hook for StatusPanelController when pin toggles (e.g. unpin while inactive → hide).
+    @ObservationIgnored var onPanelPinnedChanged: ((Bool) -> Void)?
 
     private var refreshTimer: Timer?
     private var fsSources: [UUID: DispatchSourceFileSystemObject] = [:]
@@ -187,9 +251,35 @@ final class AppState {
            let mode = PanelMode(rawValue: raw) {
             panelMode = mode
         }
+        isPanelPinned = defaults.bool(forKey: Self.panelPinnedKey)
+        diffCollapsedRepoIDs = loadCollapsedRepos(key: Self.diffCollapsedKey)
+        actionsCollapsedRepoIDs = loadCollapsedRepos(key: Self.actionsCollapsedKey)
+        pruneCollapsedRepos()
         if selectedRepoID == nil {
             selectedRepoID = activeRepos.first?.id
         }
+    }
+
+    func togglePanelPinned() {
+        isPanelPinned.toggle()
+    }
+
+    private func loadCollapsedRepos(key: String) -> Set<UUID> {
+        guard let raw = UserDefaults.standard.stringArray(forKey: key) else { return [] }
+        return Set(raw.compactMap(UUID.init(uuidString:)))
+    }
+
+    private func persistCollapsedRepos(_ ids: Set<UUID>, key: String) {
+        UserDefaults.standard.set(ids.map(\.uuidString).sorted(), forKey: key)
+    }
+
+    private func pruneCollapsedRepos() {
+        let diffIDs = Set(diffRepos.map(\.id))
+        let actionsIDs = Set(actionsRepos.map(\.id))
+        let nextDiff = diffCollapsedRepoIDs.intersection(diffIDs)
+        let nextActions = actionsCollapsedRepoIDs.intersection(actionsIDs)
+        if nextDiff != diffCollapsedRepoIDs { diffCollapsedRepoIDs = nextDiff }
+        if nextActions != actionsCollapsedRepoIDs { actionsCollapsedRepoIDs = nextActions }
     }
 
     func saveRepos() {
@@ -252,6 +342,7 @@ final class AppState {
         if target == .actions, selectedActionRun?.repoID == repo.id {
             clearActionSelection()
         }
+        pruneCollapsedRepos()
         saveRepos()
     }
 
@@ -350,20 +441,48 @@ final class AppState {
     }
 
     func refreshAll(force: Bool = false) {
-        // Diff / git only. Actions are manual via `refreshActions()`.
+        // Diff / git only. Actions use `refreshActions()`.
         Task { @MainActor in
             await refreshAllAsync(force: force)
         }
     }
 
-    /// Manual Actions refresh only — no polling, no mode-switch fetch.
+    /// Refresh Diff + Actions together (panel open / foreground).
+    func refreshVisibleSurfaces(forceDiff: Bool = true) {
+        refreshAll(force: forceDiff)
+        refreshActions()
+    }
+
+    /// Actions list refresh (manual button, on-show, or auto-poll).
     func refreshActions() {
+        guard !actionsRepos.isEmpty else { return }
+        // Coalesce: if a refresh is already in flight, let it finish rather than
+        // cancelling mid-`gh` and restarting every poll tick.
+        if actionsRefreshTask != nil, isRefreshingActions {
+            return
+        }
         actionsRefreshTask?.cancel()
         actionsRefreshGeneration += 1
         let generation = actionsRefreshGeneration
         actionsRefreshTask = Task { @MainActor in
             await refreshActionsAllAsync(generation: generation)
+            if generation == self.actionsRefreshGeneration {
+                self.actionsRefreshTask = nil
+            }
         }
+    }
+
+    /// True when any cached Actions snapshot still has an in-progress run.
+    var hasRunningActions: Bool {
+        actionsSnapshots.values.contains { snap in
+            snap.runs.contains(where: \.isRunning)
+        }
+    }
+
+    /// Whether the 10s timer should hit GitHub Actions (`gh`).
+    private var shouldPollActions: Bool {
+        guard isPanelVisible, !actionsRepos.isEmpty else { return false }
+        return panelMode == .actions || hasRunningActions
     }
 
     private func cancelActionsWork() {
@@ -576,11 +695,11 @@ final class AppState {
             }
         }
 
-        guard !Task.isCancelled, generation == actionsRefreshGeneration, panelMode == .actions else { return }
+        guard !Task.isCancelled, generation == actionsRefreshGeneration else { return }
 
-        if let selected = selectedActionRun {
-            await loadActionDetailAsync(for: selected)
-        }
+        // Detail only when Actions is the visible mode and a run is selected.
+        guard panelMode == .actions, let selected = selectedActionRun else { return }
+        await loadActionDetailAsync(for: selected)
     }
 
     private func refreshActionsRepoAsync(_ repo: WatchedRepo, generation: Int) async {
@@ -667,12 +786,16 @@ final class AppState {
 
     private func startAutoRefresh() {
         refreshTimer?.invalidate()
-        // Slow background poll for local git only — Actions are manual-refresh.
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: 12.0, repeats: true) { [weak self] _ in
+        // While the panel is visible: keep Diff fresh, and keep Actions ≤ ~10s
+        // stale when watching runs or sitting on the Actions tab (incl. pinned).
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: 10.0, repeats: true) { [weak self] _ in
             guard let self else { return }
             Task { @MainActor in
-                guard self.isPanelVisible, self.panelMode == .diff else { return }
+                guard self.isPanelVisible else { return }
                 await self.refreshAllAsync(force: false)
+                if self.shouldPollActions {
+                    self.refreshActions()
+                }
             }
         }
     }

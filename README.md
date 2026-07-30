@@ -23,7 +23,10 @@ Menu bar icon
 - Mode-specific Settings manage which repos belong to Diff vs Actions
 - Defaults to Side By Side + Wrap; both live in Diff Settings
 - Follows system light / dark appearance
-- Diff auto-refreshes local git while the panel is open; Actions loads only when you hit Refresh
+- Opening the panel (or bringing it to the foreground) immediately refreshes Diff and Actions
+- While the panel is visible, Diff polls every ~10s; Actions also polls every ~10s when any run is in progress or you are on the Actions tab (so a pinned long CD never needs a manual Refresh to flip to done)
+- Pin (next to Refresh) keeps the panel in front while you work in other apps; unpin restores normal click-away dismiss
+- Panel height follows open Diff/Actions content (up to a max) so collapsed repos don’t leave a tall empty window
 
 ## What it never does
 

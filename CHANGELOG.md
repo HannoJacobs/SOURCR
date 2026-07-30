@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.6
+
+- Auto-refresh on open: every time the menu-bar panel is shown (status-item click or Dock reopen), SOURCR immediately refreshes both Diff (local git) and Actions (`gh run list` / selected run detail) so the first glance is never a stale snapshot from the previous open.
+- Foreground refresh: when the app becomes active while the panel is already visible (typical for a pinned watch), Diff + Actions refresh again immediately so focusing the panel also clears staleness without hunting for the Refresh button.
+- While the panel stays visible, a single 10-second timer keeps Diff current and also polls Actions whenever any cached run is still in progress **or** the Actions tab is selected — so a long CD cannot sit “running” for minutes after it finished, and browsing Actions is never more than ~10s behind GitHub.
+- Polling is gated on panel visibility: when the panel is hidden there is no Actions network traffic; when it is pinned and watching a live run, the 10s cadence alone is enough to flip status/conclusion and stop the live elapsed timer shortly after completion.
+- Mode switches no longer cancel an in-flight Actions list refresh, so you can flip to Diff while a pinned CD continues to be polled in the background and still land on an up-to-date Actions list when you return.
+- Overlapping Actions refreshes coalesce (a poll tick during an in-flight `gh` does not cancel and restart the request), which keeps the Refresh spinner honest and avoids stampedes when open + timer + focus all fire close together.
+- Manual Refresh buttons remain; they force the same paths the timer uses, so muscle memory still works when you want an immediate pull.
+- Still read-only: auto-refresh only re-runs `gh run list` / `gh run view` and local `git status`/`diff` — never re-run, cancel, or approve workflows.
+- Packaging / full-send: bump CFBundle version to `1.6`, ship `SOURCR.dmg` on GitHub release `v1.6`, and reinstall `/Applications/SOURCR.app` with launch-log proof for version/build `1.6`.
+
 ## 1.5
 
 - Added an Actions mode alongside Diff: a Diff / Actions segmented control sits at the top of the right column so you can flip between local SCM changes and GitHub Actions without leaving the menu-bar panel.
@@ -10,6 +22,11 @@
 - The left Actions pane shows workflow name, branch, event, live elapsed time (ticking while in progress), a step progress bar, and a condensed step list (current window ± neighbors with ellipsis) so 90-step deploy jobs stay readable.
 - Status chrome matches GitHub’s mental model: spinner for in-progress, check for success, x for failure, plus CI/CD/misc badges derived from the workflow name. “Open on GitHub” jumps to the run URL when you need the full log.
 - Still strictly read-only: SOURCR never cancels, re-runs, approves, or otherwise mutates workflows. `GitService` only gained a read-only `remote get-url` helper for origin resolution; Actions traffic goes through `gh run list` / `gh run view`.
+- Pin toggle (next to Refresh in Diff and Actions) keeps the panel floating above other apps and skips outside-click dismiss; unpin restores normal menu-bar auto-close. Pin state persists in UserDefaults.
+- Panel height now fits the open Diff/Actions content (capped at the prior 560pt max): collapsing repos shrinks the window so a pinned single-repo Actions watch doesn’t waste screen space; opening the detail pane still enforces a readable minimum height.
+- Repo accordion open/collapse state is remembered per mode (Diff and Actions separately) across mode switches and relaunches.
+- Actions elapsed time uses the latest attempt’s `startedAt` (not original `createdAt`), so a re-run after failure shows time since that re-run instead of including the prior attempt and idle gap.
+- Actions timing is hardened for missing/`0001-` timestamps, mild clock skew, inverted start/end values, and completed runs where job completion is preferred over a later `updatedAt` bump.
 - Packaging / local ship: bump CFBundle version to `1.5`, rebuild `SOURCR.dmg`, and reinstall `/Applications/SOURCR.app` with launch-log proof for version/build `1.5`.
 
 ## 1.4

@@ -31,6 +31,11 @@ final class SOURCRAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidBecomeActive(_ notification: Notification) {
         AppDiagnostics.info(.lifecycle, "applicationDidBecomeActive")
+        // Pinned / already-open panel: treat focus as a foreground bring-up and
+        // refresh Diff + Actions immediately (coalesces with show()'s refresh).
+        if panelController?.isVisible == true {
+            appState?.refreshVisibleSurfaces(forceDiff: true)
+        }
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {

@@ -18,6 +18,9 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
     init(appState: AppState) {
         self.appState = appState
         super.init()
+        appState.onPanelPinnedChanged = { [weak self] pinned in
+            self?.handlePinChanged(pinned)
+        }
     }
 
     func install() {
@@ -61,11 +64,17 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
 
         anchoredMaxX = preferredAnchorMaxX()
         applyFrame()
+        panel?.level = appState.isPanelPinned ? .floating : .statusBar
         panel?.orderFrontRegardless()
         installOutsideClickMonitor()
         appState.isPanelVisible = true
-        appState.refreshAll(force: false)
-        AppDiagnostics.info(.lifecycle, "panel shown expanded=\(appState.isExpanded)")
+        // Opening / bringing the panel forward: refresh Diff + Actions immediately
+        // so statuses and timers are never left on a stale snapshot from last open.
+        appState.refreshVisibleSurfaces(forceDiff: true)
+        AppDiagnostics.info(
+            .lifecycle,
+            "panel shown expanded=\(appState.isExpanded) pinned=\(appState.isPanelPinned)"
+        )
     }
 
     func hide() {
@@ -108,10 +117,17 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
     private func applyFrame() {
         guard let panel else { return }
         let width = appState.isExpanded ? SOURCRLayout.expandedWidth : SOURCRLayout.scmWidth
-        let size = NSSize(width: width, height: SOURCRLayout.panelHeight)
+        var height = appState.panelHeight
         let maxX = anchoredMaxX ?? preferredAnchorMaxX()
         let topY = preferredTopY()
-        var origin = NSPoint(x: maxX - width, y: topY - SOURCRLayout.panelHeight)
+
+        if let screen = statusItem?.button?.window?.screen ?? NSScreen.main {
+            let visible = screen.visibleFrame
+            // Never taller than the visible display under the menu bar.
+            height = min(height, max(SOURCRLayout.minPanelHeight, visible.height - 16))
+        }
+
+        var origin = NSPoint(x: maxX - width, y: topY - height)
 
         if let screen = statusItem?.button?.window?.screen ?? NSScreen.main {
             let visible = screen.visibleFrame
@@ -126,7 +142,7 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
             }
         }
 
-        let targetFrame = NSRect(origin: origin, size: size)
+        let targetFrame = NSRect(origin: origin, size: NSSize(width: width, height: height))
         guard panel.frame != targetFrame else { return }
 
         // contentView auto-fills the window. AppKit will redraw on its normal pass;
@@ -164,7 +180,7 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
         })
         .environment(appState)
 
-        let size = NSSize(width: SOURCRLayout.scmWidth, height: SOURCRLayout.panelHeight)
+        let size = NSSize(width: SOURCRLayout.scmWidth, height: appState.panelHeight)
         // Hosting view is the contentView, so it always fills the window exactly.
         let hosting = NSHostingView(rootView: AnyView(root))
         hosting.wantsLayer = true
@@ -180,7 +196,7 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
         p.isOpaque = false
         p.backgroundColor = .clear
         p.hasShadow = true
-        p.level = .statusBar
+        p.level = appState.isPanelPinned ? .floating : .statusBar
         p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         p.isMovable = false
         p.isMovableByWindowBackground = false
@@ -210,8 +226,28 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
         }
     }
 
+    /// When pinned: stay hovering above other apps and skip auto-dismiss.
+    /// Explicit hide via the status-item toggle still works.
+    private func handlePinChanged(_ pinned: Bool) {
+        guard isVisible else { return }
+        if pinned {
+            panel?.level = .floating
+            panel?.orderFrontRegardless()
+            AppDiagnostics.info(.lifecycle, "panel pinned; auto-dismiss disabled")
+        } else {
+            panel?.level = .statusBar
+            AppDiagnostics.info(.lifecycle, "panel unpinned; auto-dismiss re-enabled")
+            // If they unpinned after switching away, close like a normal menu-bar item.
+            if NSApp.isActive == false {
+                hide()
+            }
+        }
+    }
+
     private func dismissIfClickOutside() {
         guard isVisible, let panel else { return }
+        if appState.isPanelPinned { return }
+
         let screenPoint = NSEvent.mouseLocation
 
         if let button = statusItem?.button, let buttonWindow = button.window {

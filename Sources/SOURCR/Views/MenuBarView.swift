@@ -23,7 +23,7 @@ struct MenuBarView: View {
             }
             rightColumn
                 .frame(width: SOURCRLayout.scmWidth)
-                .frame(maxHeight: .infinity)
+                .frame(maxHeight: .infinity, alignment: .top)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -62,6 +62,7 @@ struct MenuBarView: View {
         HStack(spacing: 8) {
             PanelModeToggle()
             Spacer(minLength: 6)
+            pinToggleButton
             switch appState.panelMode {
             case .diff:
                 HeaderIconButton(
@@ -97,6 +98,18 @@ struct MenuBarView: View {
         .padding(.vertical, 6)
     }
 
+    private var pinToggleButton: some View {
+        HeaderIconButton(
+            systemName: appState.isPanelPinned ? "pin.fill" : "pin",
+            help: appState.isPanelPinned
+                ? "Unpin panel (auto-closes when you click away)"
+                : "Pin panel (stay open while working elsewhere)",
+            isActive: appState.isPanelPinned
+        ) {
+            appState.togglePanelPinned()
+        }
+    }
+
     private var footerQuit: some View {
         VStack(spacing: 0) {
             Divider()
@@ -127,6 +140,8 @@ struct HeaderIconButton: View {
     let systemName: String
     let help: String
     var spinning: Bool = false
+    /// Accent-tinted “on” state (e.g. panel pin).
+    var isActive: Bool = false
     let action: () -> Void
 
     @State private var isHovered = false
@@ -140,13 +155,13 @@ struct HeaderIconButton: View {
                 } else {
                     Image(systemName: systemName)
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(isHovered ? Color.primary : Color.secondary)
+                        .foregroundStyle(iconColor)
                 }
             }
             .frame(width: 26, height: 26)
             .background(
                 RoundedRectangle(cornerRadius: 6)
-                    .fill(isHovered ? Color.primary.opacity(0.12) : Color.clear)
+                    .fill(backgroundFill)
             )
             // Clear backgrounds are not hittable on macOS unless shaped.
             .contentShape(Rectangle())
@@ -154,6 +169,16 @@ struct HeaderIconButton: View {
         .buttonStyle(PressableButtonStyle())
         .help(help)
         .onHover { isHovered = $0 }
+    }
+
+    private var iconColor: Color {
+        if isActive { return Color.accentColor }
+        return isHovered ? Color.primary : Color.secondary
+    }
+
+    private var backgroundFill: Color {
+        if isActive { return Color.accentColor.opacity(0.16) }
+        return isHovered ? Color.primary.opacity(0.12) : Color.clear
     }
 }
 

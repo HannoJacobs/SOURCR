@@ -97,7 +97,7 @@ enum GitHubActionsService {
             "--repo", remote.slug,
             "--limit", "\(limit)",
             "--json",
-            "databaseId,status,conclusion,displayTitle,name,headBranch,createdAt,updatedAt,url,event,workflowName"
+            "databaseId,status,conclusion,displayTitle,name,headBranch,createdAt,startedAt,updatedAt,url,event,workflowName,attempt"
         ])
 
         guard let data = json.data(using: .utf8) else {
@@ -114,7 +114,7 @@ enum GitHubActionsService {
             "run", "view", "\(run.databaseId)",
             "--repo", remote.slug,
             "--json",
-            "databaseId,status,conclusion,displayTitle,name,headBranch,createdAt,updatedAt,url,event,workflowName,jobs"
+            "databaseId,status,conclusion,displayTitle,name,headBranch,createdAt,startedAt,updatedAt,url,event,workflowName,attempt,jobs"
         ])
 
         guard let data = json.data(using: .utf8) else {
@@ -228,10 +228,22 @@ enum GitHubActionsService {
     }
 
     static func parseDate(_ raw: String?) -> Date {
-        guard let raw, !raw.isEmpty else { return Date.distantPast }
-        if let d = isoFractional.date(from: raw) { return d }
-        if let d = isoBasic.date(from: raw) { return d }
-        return Date.distantPast
+        parseDateIfPresent(raw) ?? Date.distantPast
+    }
+
+    /// Parses GitHub/gh timestamps; rejects empty, year-0001 placeholders, and pre-Actions epochs.
+    static func parseDateIfPresent(_ raw: String?) -> Date? {
+        guard let raw, !raw.isEmpty, !raw.hasPrefix("0001-") else { return nil }
+        let parsed: Date?
+        if let d = isoFractional.date(from: raw) {
+            parsed = d
+        } else if let d = isoBasic.date(from: raw) {
+            parsed = d
+        } else {
+            parsed = nil
+        }
+        guard let parsed, ActionTiming.isPlausible(parsed) else { return nil }
+        return parsed
     }
 }
 
@@ -264,13 +276,19 @@ private struct GHRunListRow: Decodable {
     let name: String?
     let headBranch: String?
     let createdAt: String?
+    let startedAt: String?
     let updatedAt: String?
     let url: String?
     let event: String?
     let workflowName: String?
+    let attempt: Int?
 
     func asActionRun(repoID: UUID) -> ActionRun {
-        ActionRun(
+        let created = GitHubActionsService.parseDate(createdAt)
+        // Keep missing startedAt as distantPast so timing falls back to createdAt
+        // without pretending the attempt started at creation on a re-run.
+        let started = GitHubActionsService.parseDate(startedAt)
+        return ActionRun(
             databaseId: databaseId,
             repoID: repoID,
             workflowName: workflowName ?? name ?? "Workflow",
@@ -279,9 +297,11 @@ private struct GHRunListRow: Decodable {
             event: event ?? "",
             status: status,
             conclusion: conclusion,
-            createdAt: GitHubActionsService.parseDate(createdAt),
+            createdAt: created,
+            startedAt: started,
             updatedAt: GitHubActionsService.parseDate(updatedAt),
-            url: url ?? ""
+            url: url ?? "",
+            attempt: max(1, attempt ?? 1)
         )
     }
 }
@@ -294,14 +314,18 @@ private struct GHRunDetailRow: Decodable {
     let name: String?
     let headBranch: String?
     let createdAt: String?
+    let startedAt: String?
     let updatedAt: String?
     let url: String?
     let event: String?
     let workflowName: String?
+    let attempt: Int?
     let jobs: [GHJob]?
 
     func asActionRun(repoID: UUID) -> ActionRun {
-        ActionRun(
+        let created = GitHubActionsService.parseDate(createdAt)
+        let started = GitHubActionsService.parseDate(startedAt)
+        return ActionRun(
             databaseId: databaseId,
             repoID: repoID,
             workflowName: workflowName ?? name ?? "Workflow",
@@ -310,9 +334,11 @@ private struct GHRunDetailRow: Decodable {
             event: event ?? "",
             status: status,
             conclusion: conclusion,
-            createdAt: GitHubActionsService.parseDate(createdAt),
+            createdAt: created,
+            startedAt: started,
             updatedAt: GitHubActionsService.parseDate(updatedAt),
-            url: url ?? ""
+            url: url ?? "",
+            attempt: max(1, attempt ?? 1)
         )
     }
 }
@@ -341,9 +367,7 @@ private struct GHJob: Decodable {
     }
 
     private func optionalDate(_ raw: String?) -> Date? {
-        guard let raw, !raw.isEmpty, !raw.hasPrefix("0001-") else { return nil }
-        let d = GitHubActionsService.parseDate(raw)
-        return d == Date.distantPast ? nil : d
+        GitHubActionsService.parseDateIfPresent(raw)
     }
 }
 
@@ -367,8 +391,6 @@ private struct GHStep: Decodable {
     }
 
     private func optionalDate(_ raw: String?) -> Date? {
-        guard let raw, !raw.isEmpty, !raw.hasPrefix("0001-") else { return nil }
-        let d = GitHubActionsService.parseDate(raw)
-        return d == Date.distantPast ? nil : d
+        GitHubActionsService.parseDateIfPresent(raw)
     }
 }

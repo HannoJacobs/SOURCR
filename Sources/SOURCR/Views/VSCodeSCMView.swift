@@ -21,14 +21,19 @@ struct VSCodeSCMView: View {
     @State private var dragTargetSlot: Int?
     @State private var dragTranslation: CGFloat = 0
     @State private var repoFrames: [UUID: CGRect] = [:]
+    @State private var measuredBodyHeight: CGFloat = 0
 
     var body: some View {
         VStack(spacing: 0) {
             if appState.diffRepos.isEmpty {
                 emptyState
+                    .frame(height: SOURCRLayout.emptyBodyHeight)
+                    .onAppear { appState.reportSCMBodyHeight(SOURCRLayout.emptyBodyHeight) }
             } else {
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 8) {
+                    // Eager VStack so body height measures the full accordion stack
+                    // (LazyVStack only lays out visible rows and under-reports).
+                    VStack(alignment: .leading, spacing: 8) {
                         ForEach(Array(appState.diffRepos.enumerated()), id: \.element.id) { index, repo in
                             RepoAccordion(
                                 repo: repo,
@@ -54,6 +59,11 @@ struct VSCodeSCMView: View {
                     .padding(.horizontal, 6)
                     .coordinateSpace(name: "repoList")
                     .onPreferenceChange(RepoFrameKey.self) { repoFrames = $0 }
+                    .background(
+                        GeometryReader { proxy in
+                            Color.clear.preference(key: SCMBodyHeightKey.self, value: proxy.size.height)
+                        }
+                    )
                     .overlay(alignment: .topLeading) {
                         if let lineY = insertionLineY {
                             Capsule()
@@ -69,6 +79,12 @@ struct VSCodeSCMView: View {
                     }
                 }
                 .scrollDisabled(draggingRepoID != nil)
+                .frame(maxWidth: .infinity)
+                .modifier(SCMBodyHeightFrame(measured: measuredBodyHeight, fill: appState.isExpanded))
+                .onPreferenceChange(SCMBodyHeightKey.self) { height in
+                    measuredBodyHeight = height
+                    appState.reportSCMBodyHeight(height)
+                }
             }
 
             if let message = appState.statusMessage, appState.panelMode == .diff {
@@ -78,12 +94,12 @@ struct VSCodeSCMView: View {
                     .padding(8)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: appState.isExpanded ? .infinity : nil, alignment: .top)
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.55))
     }
 
     private var emptyState: some View {
         VStack(spacing: 10) {
-            Spacer()
             Image(systemName: "arrow.triangle.branch")
                 .font(.system(size: 28))
                 .foregroundStyle(.tertiary)
@@ -94,7 +110,6 @@ struct VSCodeSCMView: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 24)
-            Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -231,12 +246,15 @@ private struct RepoAccordion: View {
     var onDragChanged: (Int, DragGesture.Value) -> Void = { _, _ in }
     var onDragEnded: () -> Void = {}
 
-    @State private var isOpen = true
     @State private var headerHovered = false
     @State private var gripHovered = false
 
     private var snap: RepoSnapshot {
         appState.snapshots[repo.id] ?? .empty
+    }
+
+    private var isOpen: Bool {
+        appState.isRepoAccordionOpen(repo.id, in: .diff)
     }
 
     private var isActiveDiffRepo: Bool {
@@ -270,9 +288,6 @@ private struct RepoAccordion: View {
             RoundedRectangle(cornerRadius: 6)
                 .strokeBorder(Color.primary.opacity(0.18), lineWidth: 1)
         )
-        .onAppear {
-            isOpen = snap.totalChanges > 0 || appState.diffRepos.count <= 2
-        }
     }
 
     private var grip: some View {
@@ -296,7 +311,7 @@ private struct RepoAccordion: View {
 
             Button {
                 withAnimation(.easeInOut(duration: 0.12)) {
-                    isOpen.toggle()
+                    appState.toggleRepoAccordion(repo.id, in: .diff)
                 }
                 appState.selectRepo(repo)
             } label: {
@@ -350,7 +365,7 @@ private struct RepoAccordion: View {
                 NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: repo.path)])
             }
             Button(isOpen ? "Collapse" : "Expand") {
-                isOpen.toggle()
+                appState.toggleRepoAccordion(repo.id, in: .diff)
             }
             Divider()
             Button("Remove from Diff", role: .destructive) {

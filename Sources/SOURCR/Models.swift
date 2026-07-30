@@ -200,8 +200,12 @@ struct ActionRun: Identifiable, Hashable {
     let status: String
     let conclusion: String?
     let createdAt: Date
+    /// Start of the latest attempt (`run_started_at`). Resets when a run is re-run.
+    let startedAt: Date
     let updatedAt: Date
     let url: String
+    /// 1 for the first attempt; increments on re-run.
+    let attempt: Int
 
     var workflowKind: ActionWorkflowKind {
         ActionWorkflowKind.classify(workflowName: workflowName)
@@ -224,16 +228,31 @@ struct ActionRun: Identifiable, Hashable {
         !isRunning && (conclusion == "cancelled" || conclusion == "skipped")
     }
 
-    func elapsed(at now: Date = Date()) -> TimeInterval {
-        if isRunning {
-            return max(0, now.timeIntervalSince(createdAt))
-        }
-        return max(0, updatedAt.timeIntervalSince(createdAt))
+    /// Anchor for live/completed duration: latest attempt start, not original createdAt.
+    /// Using createdAt wrongly includes prior failed attempts and the idle gap before a re-run.
+    var timingStart: Date? {
+        ActionTiming.preferredStart(startedAt: startedAt, createdAt: createdAt)
     }
 
-    /// Newer run wins (createdAt, then databaseId).
+    /// Wall-clock elapsed for this run's latest attempt.
+    /// - Running / queued / waiting: `now - start`
+    /// - Completed: `end - start`, where `end` prefers an optional job-completion hint, else `updatedAt`
+    /// Invalid/missing timestamps and mild clock skew collapse to `0` instead of huge values.
+    func elapsed(at now: Date = Date(), completedAtHint: Date? = nil) -> TimeInterval {
+        ActionTiming.elapsed(
+            startedAt: startedAt,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            isRunning: isRunning,
+            now: now,
+            completedAtHint: completedAtHint
+        )
+    }
+
+    /// Newer run wins (createdAt, then higher attempt, then databaseId).
     func isNewerThan(_ other: ActionRun) -> Bool {
         if createdAt != other.createdAt { return createdAt > other.createdAt }
+        if attempt != other.attempt { return attempt > other.attempt }
         return databaseId > other.databaseId
     }
 }
@@ -256,9 +275,15 @@ struct ActionStep: Identifiable, Hashable {
         conclusion == "failure" || conclusion == "timed_out" || conclusion == "startup_failure"
     }
 
-    func durationSeconds() -> TimeInterval? {
-        guard let startedAt else { return nil }
-        let end = completedAt ?? Date()
+    func durationSeconds(at now: Date = Date()) -> TimeInterval? {
+        guard let startedAt, ActionTiming.isPlausible(startedAt) else { return nil }
+        if startedAt > now.addingTimeInterval(ActionTiming.futureSkewTolerance) { return 0 }
+        let end: Date
+        if let completedAt, ActionTiming.isPlausible(completedAt) {
+            end = max(completedAt, startedAt)
+        } else {
+            end = now
+        }
         return max(0, end.timeIntervalSince(startedAt))
     }
 }
@@ -296,6 +321,61 @@ struct ActionRunDetail: Hashable {
 
     var totalStepCount: Int {
         jobs.reduce(0) { $0 + $1.steps.count }
+    }
+
+    /// Prefer job completion timestamps when present so post-finish `updatedAt` bumps
+    /// (artifacts, UI metadata) do not inflate the reported duration.
+    func elapsed(at now: Date = Date()) -> TimeInterval {
+        let jobEnd = jobs.compactMap(\.completedAt).filter(ActionTiming.isPlausible).max()
+        let hint = run.isRunning ? nil : jobEnd
+        return run.elapsed(at: now, completedAtHint: hint)
+    }
+}
+
+/// Shared wall-clock math for Actions run/step durations.
+enum ActionTiming {
+    /// Tolerate mild client/server clock skew before treating a start as invalid.
+    static let futureSkewTolerance: TimeInterval = 120
+    /// GitHub Actions did not exist before this; reject garbage epochs.
+    static let earliestPlausible = Date(timeIntervalSince1970: 1_420_070_400) // 2015-01-01 UTC
+
+    static func isPlausible(_ date: Date?) -> Bool {
+        guard let date else { return false }
+        guard date > Date.distantPast else { return false }
+        guard date >= earliestPlausible else { return false }
+        return true
+    }
+
+    static func preferredStart(startedAt: Date, createdAt: Date) -> Date? {
+        if isPlausible(startedAt) { return startedAt }
+        if isPlausible(createdAt) { return createdAt }
+        return nil
+    }
+
+    static func elapsed(
+        startedAt: Date,
+        createdAt: Date,
+        updatedAt: Date,
+        isRunning: Bool,
+        now: Date,
+        completedAtHint: Date? = nil
+    ) -> TimeInterval {
+        guard let start = preferredStart(startedAt: startedAt, createdAt: createdAt) else { return 0 }
+        if start > now.addingTimeInterval(futureSkewTolerance) { return 0 }
+
+        let end: Date
+        if isRunning {
+            end = now
+        } else if let hint = completedAtHint, isPlausible(hint) {
+            // Job completion is the best end anchor; clamp inverted timestamps to 0.
+            end = hint < start ? start : hint
+        } else if isPlausible(updatedAt) {
+            end = updatedAt < start ? start : updatedAt
+        } else {
+            end = start
+        }
+
+        return max(0, end.timeIntervalSince(start))
     }
 }
 

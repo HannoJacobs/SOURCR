@@ -4,20 +4,34 @@ import SwiftUI
 /// Right-column GitHub Actions list. Chrome (refresh/add/settings) lives above in MenuBarView.
 struct ActionsSCMView: View {
     @Environment(AppState.self) private var appState
+    @State private var measuredBodyHeight: CGFloat = 0
 
     var body: some View {
         VStack(spacing: 0) {
             if appState.actionsRepos.isEmpty {
                 emptyState
+                    .frame(height: SOURCRLayout.emptyBodyHeight)
+                    .onAppear { appState.reportSCMBodyHeight(SOURCRLayout.emptyBodyHeight) }
             } else {
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 8) {
                         ForEach(appState.actionsRepos) { repo in
                             ActionsRepoAccordion(repo: repo)
                         }
                     }
                     .padding(.vertical, 6)
                     .padding(.horizontal, 6)
+                    .background(
+                        GeometryReader { proxy in
+                            Color.clear.preference(key: SCMBodyHeightKey.self, value: proxy.size.height)
+                        }
+                    )
+                }
+                .frame(maxWidth: .infinity)
+                .modifier(SCMBodyHeightFrame(measured: measuredBodyHeight, fill: appState.isExpanded))
+                .onPreferenceChange(SCMBodyHeightKey.self) { height in
+                    measuredBodyHeight = height
+                    appState.reportSCMBodyHeight(height)
                 }
             }
 
@@ -28,12 +42,12 @@ struct ActionsSCMView: View {
                     .padding(8)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: appState.isExpanded ? .infinity : nil, alignment: .top)
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.55))
     }
 
     private var emptyState: some View {
         VStack(spacing: 10) {
-            Spacer()
             Image(systemName: "point.3.connected.trianglepath.dotted")
                 .font(.system(size: 28))
                 .foregroundStyle(.tertiary)
@@ -44,7 +58,6 @@ struct ActionsSCMView: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 24)
-            Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -54,10 +67,12 @@ private struct ActionsRepoAccordion: View {
     @Environment(AppState.self) private var appState
     let repo: WatchedRepo
 
-    @State private var isOpen = true
-
     private var snap: RepoActionsSnapshot {
         appState.actionsSnapshots[repo.id] ?? .empty
+    }
+
+    private var isOpen: Bool {
+        appState.isRepoAccordionOpen(repo.id, in: .actions)
     }
 
     /// Newest run per workflow name (running replaces prior pass/fail for that type).
@@ -85,7 +100,7 @@ private struct ActionsRepoAccordion: View {
     private var header: some View {
         Button {
             withAnimation(.easeInOut(duration: 0.12)) {
-                isOpen.toggle()
+                appState.toggleRepoAccordion(repo.id, in: .actions)
             }
             appState.selectRepo(repo)
         } label: {

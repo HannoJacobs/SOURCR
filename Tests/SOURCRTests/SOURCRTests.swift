@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import SOURCR
 
@@ -67,5 +68,101 @@ struct GitHubRemoteParseTests {
         #expect(GitHubActionsService.formatDuration(16) == "16s")
         #expect(GitHubActionsService.formatDuration(89) == "1m29s")
         #expect(GitHubActionsService.formatDuration(3614) == "1h00m14s")
+    }
+}
+
+struct ActionTimingTests {
+    private let created = Date(timeIntervalSince1970: 1_785_330_643) // 2026-07-29T12:30:43Z
+    private let startedRerun = Date(timeIntervalSince1970: 1_785_333_035) // 2026-07-29T13:10:35Z
+    private let failedAt = Date(timeIntervalSince1970: 1_785_331_918) // 2026-07-29T12:51:58Z
+
+    @Test func prefersStartedAtOverCreatedAtForReruns() {
+        let now = startedRerun.addingTimeInterval(10 * 60 + 12)
+        let elapsed = ActionTiming.elapsed(
+            startedAt: startedRerun,
+            createdAt: created,
+            updatedAt: startedRerun.addingTimeInterval(13),
+            isRunning: true,
+            now: now
+        )
+        #expect(Int(elapsed.rounded()) == 612)
+    }
+
+    @Test func fallsBackToCreatedAtWhenStartedAtMissing() {
+        let now = created.addingTimeInterval(90)
+        let elapsed = ActionTiming.elapsed(
+            startedAt: .distantPast,
+            createdAt: created,
+            updatedAt: .distantPast,
+            isRunning: true,
+            now: now
+        )
+        #expect(Int(elapsed.rounded()) == 90)
+    }
+
+    @Test func completedUsesUpdatedAtMinusStartedAt() {
+        let elapsed = ActionTiming.elapsed(
+            startedAt: created,
+            createdAt: created,
+            updatedAt: failedAt,
+            isRunning: false,
+            now: failedAt.addingTimeInterval(3600)
+        )
+        #expect(Int(elapsed.rounded()) == Int(failedAt.timeIntervalSince(created).rounded()))
+    }
+
+    @Test func completedPrefersJobCompletionHintOverUpdatedAtBump() {
+        let jobEnd = startedRerun.addingTimeInterval(600)
+        let updatedBump = jobEnd.addingTimeInterval(120) // artifact / metadata bump
+        let elapsed = ActionTiming.elapsed(
+            startedAt: startedRerun,
+            createdAt: created,
+            updatedAt: updatedBump,
+            isRunning: false,
+            now: updatedBump,
+            completedAtHint: jobEnd
+        )
+        #expect(Int(elapsed.rounded()) == 600)
+    }
+
+    @Test func invertedTimestampsYieldZero() {
+        let elapsed = ActionTiming.elapsed(
+            startedAt: failedAt,
+            createdAt: created,
+            updatedAt: created,
+            isRunning: false,
+            now: failedAt
+        )
+        #expect(elapsed == 0)
+    }
+
+    @Test func missingTimestampsYieldZero() {
+        let elapsed = ActionTiming.elapsed(
+            startedAt: .distantPast,
+            createdAt: .distantPast,
+            updatedAt: .distantPast,
+            isRunning: true,
+            now: Date()
+        )
+        #expect(elapsed == 0)
+    }
+
+    @Test func futureStartBeyondSkewYieldsZero() {
+        let now = created
+        let futureStart = now.addingTimeInterval(600)
+        let elapsed = ActionTiming.elapsed(
+            startedAt: futureStart,
+            createdAt: created,
+            updatedAt: .distantPast,
+            isRunning: true,
+            now: now
+        )
+        #expect(elapsed == 0)
+    }
+
+    @Test func rejectsPlaceholderDates() {
+        #expect(GitHubActionsService.parseDateIfPresent("0001-01-01T00:00:00Z") == nil)
+        #expect(GitHubActionsService.parseDateIfPresent("") == nil)
+        #expect(GitHubActionsService.parseDateIfPresent("2026-07-29T13:10:35Z") != nil)
     }
 }
