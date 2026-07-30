@@ -472,19 +472,6 @@ final class AppState {
         }
     }
 
-    /// True when any cached Actions snapshot still has an in-progress run.
-    var hasRunningActions: Bool {
-        actionsSnapshots.values.contains { snap in
-            snap.runs.contains(where: \.isRunning)
-        }
-    }
-
-    /// Whether the 10s timer should hit GitHub Actions (`gh`).
-    private var shouldPollActions: Bool {
-        guard isPanelVisible, !actionsRepos.isEmpty else { return false }
-        return panelMode == .actions || hasRunningActions
-    }
-
     private func cancelActionsWork() {
         actionsRefreshTask?.cancel()
         actionsRefreshTask = nil
@@ -786,16 +773,13 @@ final class AppState {
 
     private func startAutoRefresh() {
         refreshTimer?.invalidate()
-        // While the panel is visible: keep Diff fresh, and keep Actions ≤ ~10s
-        // stale when watching runs or sitting on the Actions tab (incl. pinned).
+        // Panel open + visible → always refresh Diff and Actions every 10s.
+        // Hidden panel → no poll traffic.
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 10.0, repeats: true) { [weak self] _ in
             guard let self else { return }
             Task { @MainActor in
                 guard self.isPanelVisible else { return }
-                await self.refreshAllAsync(force: false)
-                if self.shouldPollActions {
-                    self.refreshActions()
-                }
+                self.refreshVisibleSurfaces(forceDiff: false)
             }
         }
     }

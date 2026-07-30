@@ -24,7 +24,7 @@ Menu bar icon
 - Defaults to Side By Side + Wrap; both live in Diff Settings
 - Follows system light / dark appearance
 - Opening the panel (or bringing it to the foreground) immediately refreshes Diff and Actions
-- While the panel is visible, Diff polls every ~10s; Actions also polls every ~10s when any run is in progress or you are on the Actions tab (so a pinned long CD never needs a manual Refresh to flip to done)
+- While the panel is visible, Diff and Actions both refresh every ~10s (no manual Refresh needed to catch a finished CD)
 - Pin (next to Refresh) keeps the panel in front while you work in other apps; unpin restores normal click-away dismiss
 - Panel height follows open Diff/Actions content (up to a max) so collapsed repos don’t leave a tall empty window
 

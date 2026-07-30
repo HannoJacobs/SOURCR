@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.7
+
+- Simplified visible-panel polling: while the menu-bar panel is open and visible, SOURCR now always refreshes **both** Diff and Actions every 10 seconds — not only when a run is in progress or the Actions tab is selected.
+- Removed the `shouldPollActions` / `hasRunningActions` gate so a pinned watch (or any open panel) cannot sit on a stale completed/failed/success status for longer than one poll interval, regardless of mode or whether anything looked “running” in the last snapshot.
+- The 10s timer still calls the same `refreshVisibleSurfaces` path used on open/foreground, so Diff git status and Actions `gh run list` (+ selected run detail) stay on one cadence and share the existing in-flight coalesce behavior.
+- Hidden panel still means no poll traffic: closing the panel stops the network/`gh` work immediately; reopening still does an immediate refresh, then resumes the unconditional 10s loop.
+- Docs/README updated to match the simpler rule (“visible → always 10s for Diff + Actions”).
+- No change to the read-only guarantee: auto-refresh still only re-runs local git probes and read-only `gh run list` / `gh run view`.
+- Manual Refresh buttons remain as a force pull on top of the timer.
+- Packaging / full-send: bump CFBundle version to `1.7`, ship `SOURCR.dmg` on GitHub release `v1.7`, and reinstall `/Applications/SOURCR.app` with launch-log proof for version/build `1.7`.
+
 ## 1.6
 
 - Auto-refresh on open: every time the menu-bar panel is shown (status-item click or Dock reopen), SOURCR immediately refreshes both Diff (local git) and Actions (`gh run list` / selected run detail) so the first glance is never a stale snapshot from the previous open.
