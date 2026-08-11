@@ -1,8 +1,10 @@
+import Darwin
 import Foundation
 
 enum GitCommandError: LocalizedError {
     case notAGitRepo(String)
     case gitFailed(command: [String], status: Int32, stderr: String)
+    case timedOut(command: [String], timeout: TimeInterval)
     case invalidOutput(String)
 
     var errorDescription: String? {
@@ -11,6 +13,8 @@ enum GitCommandError: LocalizedError {
             return "Not a git repository: \(path)"
         case .gitFailed(let command, let status, let stderr):
             return "git \(command.joined(separator: " ")) failed (\(status)): \(stderr)"
+        case .timedOut(let command, let timeout):
+            return "git \(command.joined(separator: " ")) timed out after \(Int(timeout))s"
         case .invalidOutput(let detail):
             return detail
         }
@@ -22,6 +26,9 @@ enum GitService {
     private static let allowedSubcommands: Set<String> = [
         "status", "diff", "show", "rev-parse", "ls-files", "remote", "--version"
     ]
+
+    /// Hard ceiling so a wedged `git status` cannot pin a thread forever.
+    static let commandTimeout: TimeInterval = 20
 
     static func isGitRepository(_ path: String) -> Bool {
         let fm = FileManager.default
@@ -186,7 +193,11 @@ enum GitService {
     }
 
     @discardableResult
-    private static func run(in workingDirectory: String, _ arguments: [String]) throws -> String {
+    private static func run(
+        in workingDirectory: String,
+        _ arguments: [String],
+        timeout: TimeInterval = commandTimeout
+    ) throws -> String {
         guard let head = arguments.first else {
             throw GitCommandError.invalidOutput("Empty git command")
         }
@@ -211,13 +222,57 @@ enum GitService {
         process.standardOutput = stdout
         process.standardError = stderr
 
-        try process.run()
-        process.waitUntilExit()
+        // Read pipes concurrently *before* waiting for exit. Waiting first deadlocks
+        // when porcelain/`-uall` output exceeds the ~64KB pipe buffer (git blocks on
+        // write; we block on waitUntilExit and never drain).
+        let group = DispatchGroup()
+        let dataLock = NSLock()
+        var outData = Data()
+        var errData = Data()
 
-        let outData = stdout.fileHandleForReading.readDataToEndOfFile()
-        let errData = stderr.fileHandleForReading.readDataToEndOfFile()
+        group.enter()
+        DispatchQueue.global(qos: .utility).async {
+            let data = stdout.fileHandleForReading.readDataToEndOfFile()
+            dataLock.lock()
+            outData = data
+            dataLock.unlock()
+            group.leave()
+        }
+
+        group.enter()
+        DispatchQueue.global(qos: .utility).async {
+            let data = stderr.fileHandleForReading.readDataToEndOfFile()
+            dataLock.lock()
+            errData = data
+            dataLock.unlock()
+            group.leave()
+        }
+
+        try process.run()
+
+        let exitBox = ExitSignal()
+        DispatchQueue.global(qos: .utility).async {
+            process.waitUntilExit()
+            exitBox.signal()
+        }
+
+        if !exitBox.wait(timeout: timeout) {
+            process.terminate()
+            // Escalate if terminate is ignored (stuck uninterruptible IO).
+            if !exitBox.wait(timeout: 2) {
+                kill(process.processIdentifier, SIGKILL)
+                _ = exitBox.wait(timeout: 2)
+            }
+            _ = group.wait(timeout: .now() + 1)
+            throw GitCommandError.timedOut(command: arguments, timeout: timeout)
+        }
+
+        _ = group.wait(timeout: .now() + 5)
+
+        dataLock.lock()
         let out = String(data: outData, encoding: .utf8) ?? ""
         let err = String(data: errData, encoding: .utf8) ?? ""
+        dataLock.unlock()
 
         if process.terminationStatus != 0 {
             throw GitCommandError.gitFailed(
@@ -228,5 +283,18 @@ enum GitService {
         }
 
         return out
+    }
+}
+
+/// One-shot waitable signal for process exit (avoids busy-looping the caller).
+private final class ExitSignal: @unchecked Sendable {
+    private let semaphore = DispatchSemaphore(value: 0)
+
+    func signal() {
+        semaphore.signal()
+    }
+
+    func wait(timeout: TimeInterval) -> Bool {
+        semaphore.wait(timeout: .now() + timeout) == .success
     }
 }

@@ -2,6 +2,48 @@ import Foundation
 import Testing
 @testable import SOURCR
 
+struct GitServiceHardeningTests {
+    @Test func largeUntrackedStatusDoesNotDeadlock() throws {
+        // Repro of the 1.7 production failure mode: `git status -uall` writing more
+        // than the ~64KB pipe buffer while the parent waited before draining stdout.
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("sourcr-status-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        try runGit(in: root.path, ["init"])
+        try runGit(in: root.path, ["config", "user.email", "sourcr-test@example.com"])
+        try runGit(in: root.path, ["config", "user.name", "SOURCR Test"])
+
+        // ~2000 medium paths ≈ well over 64KB of porcelain when listed with -uall.
+        for i in 0..<2_000 {
+            let name = String(format: "untracked_file_%04d_with_padding_to_grow_porcelain_lines.txt", i)
+            try Data("x\n".utf8).write(to: root.appendingPathComponent(name))
+        }
+
+        let started = Date()
+        let snapshot = try GitService.loadSnapshot(repoPath: root.path)
+        let elapsed = Date().timeIntervalSince(started)
+
+        #expect(snapshot.untracked.count == 2_000)
+        #expect(elapsed < 15, "status should complete well under the \(Int(GitService.commandTimeout))s timeout")
+    }
+
+    private func runGit(in workingDirectory: String, _ arguments: [String]) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = arguments
+        process.currentDirectoryURL = URL(fileURLWithPath: workingDirectory)
+        process.standardOutput = Pipe()
+        process.standardError = Pipe()
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            throw GitCommandError.gitFailed(command: arguments, status: process.terminationStatus, stderr: "test git failed")
+        }
+    }
+}
+
 struct DiffParserTests {
     @Test func parsesUnifiedDiff() {
         let raw = """

@@ -38,7 +38,16 @@ final class AppState {
     private let showUnchanged = false
     var isRefreshing = false
     var statusMessage: String?
-    var isPanelVisible = false
+    var isPanelVisible = false {
+        didSet {
+            guard isPanelVisible != oldValue else { return }
+            // Hidden panel: drop in-flight git/gh work so a wedged child cannot
+            // keep the coalesce latch / thread pool busy until the next open.
+            if !isPanelVisible {
+                cancelBackgroundRefreshWork()
+            }
+        }
+    }
     /// When true, the panel stays open while working in other apps (no auto-dismiss).
     var isPanelPinned = false {
         didSet {
@@ -164,6 +173,9 @@ final class AppState {
     private var actionsRefreshGeneration = 0
     @ObservationIgnored private var actionsRefreshTask: Task<Void, Never>?
     @ObservationIgnored private var actionDetailTask: Task<Void, Never>?
+    /// One in-flight Diff refresh per repo — newer FSEvents/poll cancels the prior.
+    @ObservationIgnored private var repoRefreshTasks: [UUID: Task<Void, Never>] = [:]
+    @ObservationIgnored private var repoRefreshGenerations: [UUID: Int] = [:]
 
     var selectedRepo: WatchedRepo? {
         guard let selectedRepoID else { return activeRepos.first }
@@ -328,6 +340,10 @@ final class AppState {
         list.removeAll { $0.id == repo.id }
         setRepos(list, for: target)
 
+        if target == .diff {
+            cancelRepoRefresh(repo.id)
+        }
+
         let stillWatched = allUniqueRepos.contains { $0.id == repo.id }
         if !stillWatched {
             snapshots.removeValue(forKey: repo.id)
@@ -457,7 +473,8 @@ final class AppState {
     func refreshActions() {
         guard !actionsRepos.isEmpty else { return }
         // Coalesce: if a refresh is already in flight, let it finish rather than
-        // cancelling mid-`gh` and restarting every poll tick.
+        // cancelling mid-`gh` and restarting every poll tick. Timeouts in
+        // GitHubActionsService ensure this latch cannot stick forever.
         if actionsRefreshTask != nil, isRefreshingActions {
             return
         }
@@ -470,6 +487,24 @@ final class AppState {
                 self.actionsRefreshTask = nil
             }
         }
+    }
+
+    /// Cancel Diff + Actions network/git work (panel hide / repo remove).
+    private func cancelBackgroundRefreshWork() {
+        for task in fsDebounceTasks.values {
+            task.cancel()
+        }
+        fsDebounceTasks.removeAll()
+        for id in Array(repoRefreshTasks.keys) {
+            cancelRepoRefresh(id)
+        }
+        cancelActionsWork()
+    }
+
+    private func cancelRepoRefresh(_ repoID: UUID) {
+        repoRefreshTasks[repoID]?.cancel()
+        repoRefreshTasks[repoID] = nil
+        repoRefreshGenerations[repoID, default: 0] += 1
     }
 
     private func cancelActionsWork() {
@@ -575,6 +610,25 @@ final class AppState {
     }
 
     private func refreshRepoAsync(_ repo: WatchedRepo, force: Bool) async {
+        // Newer poll/FSEvents for the same repo replaces an in-flight status so
+        // we never stack N wedged `git status` children against one tree.
+        cancelRepoRefresh(repo.id)
+        let generation = (repoRefreshGenerations[repo.id] ?? 0)
+        let repoID = repo.id
+
+        let task = Task { @MainActor in
+            await self.performRepoRefresh(repo, force: force, generation: generation)
+        }
+        repoRefreshTasks[repoID] = task
+        await task.value
+        if generation == (repoRefreshGenerations[repoID] ?? 0) {
+            repoRefreshTasks[repoID] = nil
+        }
+    }
+
+    private func performRepoRefresh(_ repo: WatchedRepo, force: Bool, generation: Int) async {
+        guard generation == (repoRefreshGenerations[repo.id] ?? 0) else { return }
+
         let path = repo.path
         let includeUnchanged = showUnchanged
         let previous = snapshots[repo.id]?.statusFingerprint
@@ -583,6 +637,8 @@ final class AppState {
             let snapshot = try await Task.detached(priority: .utility) {
                 try GitService.loadSnapshot(repoPath: path, includeUnchangedSample: includeUnchanged)
             }.value
+
+            guard !Task.isCancelled, generation == (repoRefreshGenerations[repo.id] ?? 0) else { return }
 
             if !force, snapshot.statusFingerprint == previous {
                 return
@@ -595,7 +651,10 @@ final class AppState {
             )
 
             await reconcileOpenDiff(afterRefreshing: repo)
+        } catch is CancellationError {
+            return
         } catch {
+            guard !Task.isCancelled, generation == (repoRefreshGenerations[repo.id] ?? 0) else { return }
             snapshots[repo.id] = RepoSnapshot(
                 branch: "—",
                 headSHA: "",
@@ -807,10 +866,13 @@ final class AppState {
             let repoID = repo.id
             source.setEventHandler { [weak self] in
                 guard let self else { return }
+                // Match the 10s timer: no Diff git traffic while the panel is hidden.
+                guard self.isPanelVisible else { return }
                 self.fsDebounceTasks[repoID]?.cancel()
                 self.fsDebounceTasks[repoID] = Task { @MainActor in
                     try? await Task.sleep(for: .milliseconds(350))
                     guard !Task.isCancelled else { return }
+                    guard self.isPanelVisible else { return }
                     guard let live = self.diffRepos.first(where: { $0.id == repoID }) else { return }
                     await self.refreshRepoAsync(live, force: false)
                 }

@@ -4,6 +4,7 @@ enum GitHubActionsError: LocalizedError {
     case ghNotFound
     case noGitHubRemote
     case ghFailed(status: Int32, stderr: String)
+    case timedOut(TimeInterval)
     case invalidJSON(String)
 
     var errorDescription: String? {
@@ -15,6 +16,8 @@ enum GitHubActionsError: LocalizedError {
         case .ghFailed(_, let stderr):
             let trimmed = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
             return trimmed.isEmpty ? "gh command failed" : trimmed
+        case .timedOut(let timeout):
+            return "gh timed out after \(Int(timeout))s"
         case .invalidJSON(let detail):
             return detail
         }
@@ -23,6 +26,9 @@ enum GitHubActionsError: LocalizedError {
 
 /// Read-only GitHub Actions access via the `gh` CLI.
 enum GitHubActionsService {
+    /// Hard ceiling so a stuck `gh` cannot hold the Actions coalesce latch forever.
+    static let commandTimeout: TimeInterval = 25
+
     private static let isoFractional: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -148,6 +154,23 @@ enum GitHubActionsService {
     /// Prefer the user's real environment (so `HOME` / `gh` auth config resolve),
     /// and make the wait cancellable so rapid Diff↔Actions toggles don't pile up.
     private static func runGH(_ arguments: [String]) async throws -> String {
+        try await withThrowingTaskGroup(of: String.self) { group in
+            group.addTask {
+                try await self.runGHProcess(arguments)
+            }
+            group.addTask {
+                try await Task.sleep(for: .seconds(commandTimeout))
+                throw GitHubActionsError.timedOut(commandTimeout)
+            }
+            guard let first = try await group.next() else {
+                throw GitHubActionsError.invalidJSON("Empty gh result")
+            }
+            group.cancelAll()
+            return first
+        }
+    }
+
+    private static func runGHProcess(_ arguments: [String]) async throws -> String {
         guard let executable = resolveGHPath() else {
             throw GitHubActionsError.ghNotFound
         }
@@ -164,15 +187,31 @@ enum GitHubActionsService {
         process.standardOutput = stdout
         process.standardError = stderr
 
+        // Drain pipes on background queues while the process runs so large
+        // `gh run view --json …jobs` payloads cannot fill the pipe buffer.
+        let group = DispatchGroup()
+        let outBox = DataBox()
+        let errBox = DataBox()
+
+        group.enter()
+        DispatchQueue.global(qos: .utility).async {
+            outBox.store(stdout.fileHandleForReading.readDataToEndOfFile())
+            group.leave()
+        }
+        group.enter()
+        DispatchQueue.global(qos: .utility).async {
+            errBox.store(stderr.fileHandleForReading.readDataToEndOfFile())
+            group.leave()
+        }
+
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
                 let box = ResumeOnce(continuation)
 
                 process.terminationHandler = { proc in
-                    let outData = stdout.fileHandleForReading.readDataToEndOfFile()
-                    let errData = stderr.fileHandleForReading.readDataToEndOfFile()
-                    let out = String(data: outData, encoding: .utf8) ?? ""
-                    let err = String(data: errData, encoding: .utf8) ?? ""
+                    _ = group.wait(timeout: .now() + 5)
+                    let out = String(data: outBox.load(), encoding: .utf8) ?? ""
+                    let err = String(data: errBox.load(), encoding: .utf8) ?? ""
 
                     if proc.terminationStatus == 0 {
                         box.resume(.success(out))
@@ -263,6 +302,23 @@ private final class ResumeOnce: @unchecked Sendable {
         guard !settled else { return }
         settled = true
         continuation.resume(with: result)
+    }
+}
+
+private final class DataBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var data = Data()
+
+    func store(_ value: Data) {
+        lock.lock()
+        data = value
+        lock.unlock()
+    }
+
+    func load() -> Data {
+        lock.lock()
+        defer { lock.unlock() }
+        return data
     }
 }
 

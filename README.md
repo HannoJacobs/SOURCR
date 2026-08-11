@@ -27,6 +27,7 @@ Menu bar icon
 - While the panel is visible, Diff and Actions both refresh every ~10s (no manual Refresh needed to catch a finished CD)
 - Pin (next to Refresh) keeps the panel in front while you work in other apps; unpin restores normal click-away dismiss
 - Panel height follows open Diff/Actions content (up to a max) so collapsed repos don’t leave a tall empty window
+- Git/`gh` child processes drain pipes while running and time out (so a huge `git status -uall` or stuck `gh` cannot freeze refreshes until quit)
 
 ## What it never does
 

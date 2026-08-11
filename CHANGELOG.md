@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.8
+
+- Fixed a production deadlock that made SOURCR need repeated quits while watching Actions/CD: `GitService` called `waitUntilExit()` **before** draining stdout/stderr, so a large `git status -uall` (pipe output ≳64KB) blocked git on write and SOURCR on wait forever.
+- Live evidence from 1.7 sessions: multiple hung `git status --porcelain=v1 -b -uall` children in `/Users/…/phd` stuck in `wt_shortstatus_other → fprintf → __sflush`, with Actions polling dying once those `waitUntilExit` threads exhausted the pool — quit was the only recovery.
+- `GitService.run` now reads stdout/stderr concurrently on utility queues while the process runs, then joins; large untracked trees complete instead of wedging the app.
+- Added a 20s git command timeout that `terminate`s (then `SIGKILL`s) a stuck child so a single bad repo cannot pin threads indefinitely.
+- Diff refresh is now one in-flight task per repo: a newer FSEvents/poll cancels the prior status for that repo instead of stacking N parallel `git status` processes against the same tree.
+- FSEvents-driven Diff refreshes are gated on panel visibility (same rule as the 10s timer), and hiding the panel cancels in-flight Diff debounce/repo refresh work plus Actions `gh` work so a background wedge cannot outlive the UI.
+- Removing a Diff repo cancels that repo’s in-flight status immediately (no orphaned children after “Remove from Diff”).
+- Hardened Actions the same way: `gh` runs drain pipes while running, and each `gh` call has a 25s timeout so the Actions coalesce latch (`isRefreshingActions`) cannot stick true forever after a hung network/CLI call.
+- Still read-only: hardening only changes process IO/lifetime around existing `status`/`diff`/`show`/`rev-parse`/`ls-files`/`remote get-url` and read-only `gh run list` / `gh run view`.
+- Added a regression test that builds a temp repo with 2000 untracked files and asserts `loadSnapshot` finishes well under the timeout (guards the pipe-deadlock class of failure).
+- Packaging / full-send: bump CFBundle version to `1.8`, ship `SOURCR.dmg` on GitHub release `v1.8`, and reinstall `/Applications/SOURCR.app` with launch-log proof for version/build `1.8`.
+
 ## 1.7
 
 - Simplified visible-panel polling: while the menu-bar panel is open and visible, SOURCR now always refreshes **both** Diff and Actions every 10 seconds — not only when a run is in progress or the Actions tab is selected.
