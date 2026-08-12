@@ -151,89 +151,30 @@ enum GitHubActionsService {
 
     // MARK: - gh process
 
-    /// Prefer the user's real environment (so `HOME` / `gh` auth config resolve),
-    /// and make the wait cancellable so rapid Diff↔Actions toggles don't pile up.
+    /// Same temp-file + watchdog runner as git (`ExternalProcess`).
     private static func runGH(_ arguments: [String]) async throws -> String {
-        try await withThrowingTaskGroup(of: String.self) { group in
-            group.addTask {
-                try await self.runGHProcess(arguments)
-            }
-            group.addTask {
-                try await Task.sleep(for: .seconds(commandTimeout))
-                throw GitHubActionsError.timedOut(commandTimeout)
-            }
-            guard let first = try await group.next() else {
-                throw GitHubActionsError.invalidJSON("Empty gh result")
-            }
-            group.cancelAll()
-            return first
-        }
-    }
-
-    private static func runGHProcess(_ arguments: [String]) async throws -> String {
         guard let executable = resolveGHPath() else {
             throw GitHubActionsError.ghNotFound
         }
 
         try Task.checkCancellation()
 
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: executable)
-        process.arguments = arguments
-        process.environment = ghEnvironment()
-
-        let stdout = Pipe()
-        let stderr = Pipe()
-        process.standardOutput = stdout
-        process.standardError = stderr
-
-        // Drain pipes on background queues while the process runs so large
-        // `gh run view --json …jobs` payloads cannot fill the pipe buffer.
-        let group = DispatchGroup()
-        let outBox = DataBox()
-        let errBox = DataBox()
-
-        group.enter()
-        DispatchQueue.global(qos: .utility).async {
-            outBox.store(stdout.fileHandleForReading.readDataToEndOfFile())
-            group.leave()
-        }
-        group.enter()
-        DispatchQueue.global(qos: .utility).async {
-            errBox.store(stderr.fileHandleForReading.readDataToEndOfFile())
-            group.leave()
-        }
-
-        return try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
-                let box = ResumeOnce(continuation)
-
-                process.terminationHandler = { proc in
-                    _ = group.wait(timeout: .now() + 5)
-                    let out = String(data: outBox.load(), encoding: .utf8) ?? ""
-                    let err = String(data: errBox.load(), encoding: .utf8) ?? ""
-
-                    if proc.terminationStatus == 0 {
-                        box.resume(.success(out))
-                    } else if proc.terminationReason == .uncaughtSignal {
-                        box.resume(.failure(CancellationError()))
-                    } else {
-                        box.resume(.failure(
-                            GitHubActionsError.ghFailed(status: proc.terminationStatus, stderr: err)
-                        ))
-                    }
-                }
-
-                do {
-                    try process.run()
-                } catch {
-                    box.resume(.failure(error))
-                }
-            }
-        } onCancel: {
-            if process.isRunning {
-                process.terminate()
-            }
+        let environment = ghEnvironment()
+        do {
+            return try await Task.detached(priority: .utility) {
+                try ExternalProcess.run(
+                    executable: executable,
+                    arguments: arguments,
+                    environment: environment,
+                    timeout: commandTimeout
+                )
+            }.value
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch ExternalProcessError.timedOut(let seconds) {
+            throw GitHubActionsError.timedOut(seconds)
+        } catch ExternalProcessError.failed(let status, let stderr) {
+            throw GitHubActionsError.ghFailed(status: status, stderr: stderr)
         }
     }
 
@@ -283,42 +224,6 @@ enum GitHubActionsService {
         }
         guard let parsed, ActionTiming.isPlausible(parsed) else { return nil }
         return parsed
-    }
-}
-
-/// Ensures a CheckedContinuation is resumed exactly once across process callbacks.
-private final class ResumeOnce: @unchecked Sendable {
-    private let lock = NSLock()
-    private var settled = false
-    private let continuation: CheckedContinuation<String, Error>
-
-    init(_ continuation: CheckedContinuation<String, Error>) {
-        self.continuation = continuation
-    }
-
-    func resume(_ result: Result<String, Error>) {
-        lock.lock()
-        defer { lock.unlock() }
-        guard !settled else { return }
-        settled = true
-        continuation.resume(with: result)
-    }
-}
-
-private final class DataBox: @unchecked Sendable {
-    private let lock = NSLock()
-    private var data = Data()
-
-    func store(_ value: Data) {
-        lock.lock()
-        data = value
-        lock.unlock()
-    }
-
-    func load() -> Data {
-        lock.lock()
-        defer { lock.unlock() }
-        return data
     }
 }
 

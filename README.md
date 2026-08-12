@@ -86,6 +86,7 @@ Launch evidence is written to:
 | `SOURCRApp` / `SOURCRAppDelegate` | Accessory app + status-item wiring |
 | `StatusPanelController` | Anchored `NSPanel`, outside-click dismiss, leftward expand |
 | `AppState` | Watched repos, Diff/Actions mode, snapshots, selection, refresh, reorder |
+| `ExternalProcess` | Shared temp-file + watchdog CLI runner for `git` / `gh` |
 | `GitService` | Read-only git CLI wrapper |
 | `GitHubActionsService` | Read-only `gh` Actions list/detail + remote URL parse |
 | `DiffParser` | Unified + side-by-side rendering model |

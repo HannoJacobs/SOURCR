@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.10
+
+- Unified `git` and `gh` onto one `ExternalProcess` runner (temp-file stdout/stderr + caller-thread `waitUntilExit` + private watchdog timeout) so Actions no longer keeps the older Pipe/`DispatchQueue.global` drain path that 1.8/1.9 already rejected for git.
+- Removed the duplicate `gh` process stack (`ResumeOnce`, `DataBox`, pipe readers, nested timeout `TaskGroup`) — less concurrent machinery, one failure model (`ExternalProcessError` mapped to git/`gh` errors).
+- Keeps 1.9 product behavior: in-flight Diff/`gh` refreshes may finish after panel hide; FSEvents Diff probes still pause while hidden; per-repo Diff coalesce and read-only guarantees unchanged.
+- Still read-only: shared runner only executes the existing allow-listed `git` subcommands and read-only `gh run list` / `gh run view`.
+- Docs/README note the single process runner; regression tests for large `-uall` and concurrent status still cover the shared path via `GitService`.
+- Packaging / full-send: bump CFBundle version to `1.10`, ship `SOURCR.dmg` on GitHub release `v1.10`, and reinstall `/Applications/SOURCR.app` with launch-log proof for version/build `1.10`.
+- No intentional UI changes in this release — reliability/architecture only on top of 1.9.
+- Closes the half-migrated state called out after 1.9: both CLIs now share the same process IO strategy instead of drifting.
+
 ## 1.9
 
 - Fixed a 1.8 regression that could show stale Diff counts (e.g. AGENTIC “4 changes” while Cursor/git were clean): under concurrent refresh, `GitService` waited on a `DispatchQueue.global` exit callback from another global-queue thread, so the pool could self-deadlock and every `git` call false-timed-out after 20s — cancelling mid-flight then left the last good snapshot on screen.

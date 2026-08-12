@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 
 enum GitCommandError: LocalizedError {
@@ -192,8 +191,6 @@ enum GitService {
         }
     }
 
-    private static let watchdogQueue = DispatchQueue(label: "com.sourcr.git.watchdog")
-
     @discardableResult
     private static func run(
         in workingDirectory: String,
@@ -208,92 +205,23 @@ enum GitService {
             throw GitCommandError.invalidOutput("Blocked non-readonly git subcommand: \(head)")
         }
 
-        // Capture stdout/stderr in temp files instead of Pipes. Pipes need concurrent
-        // drains to avoid the ~64KB buffer deadlock, and draining via GCD while also
-        // waiting for exit on the same pool caused 1.8's false 20s timeouts. Files
-        // sidestep both failure modes.
-        let fm = FileManager.default
-        let outURL = fm.temporaryDirectory.appendingPathComponent("sourcr-git-out-\(UUID().uuidString)")
-        let errURL = fm.temporaryDirectory.appendingPathComponent("sourcr-git-err-\(UUID().uuidString)")
-        fm.createFile(atPath: outURL.path, contents: nil)
-        fm.createFile(atPath: errURL.path, contents: nil)
-        defer {
-            try? fm.removeItem(at: outURL)
-            try? fm.removeItem(at: errURL)
-        }
-
-        let outHandle = try FileHandle(forWritingTo: outURL)
-        let errHandle = try FileHandle(forWritingTo: errURL)
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = arguments
-        process.currentDirectoryURL = URL(fileURLWithPath: workingDirectory)
-        process.environment = [
-            "PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin",
-            "GIT_PAGER": "cat",
-            "GIT_TERMINAL_PROMPT": "0",
-            "LC_ALL": "C"
-        ]
-        process.standardOutput = outHandle
-        process.standardError = errHandle
-
-        let timedOutFlag = TimeoutFlag()
-        let watchdog = DispatchSource.makeTimerSource(queue: watchdogQueue)
-        watchdog.setEventHandler {
-            timedOutFlag.mark()
-            if process.isRunning {
-                process.terminate()
-            }
-        }
-        watchdog.schedule(deadline: .now() + timeout)
-        watchdog.resume()
-        defer { watchdog.cancel() }
-
-        try process.run()
-        process.waitUntilExit()
-
-        if process.isRunning {
-            kill(process.processIdentifier, SIGKILL)
-            process.waitUntilExit()
-        }
-
-        // Close writer ends before reading the files back.
-        try? outHandle.close()
-        try? errHandle.close()
-
-        let out = (try? String(contentsOf: outURL, encoding: .utf8)) ?? ""
-        let err = (try? String(contentsOf: errURL, encoding: .utf8)) ?? ""
-
-        if timedOutFlag.triggered {
-            throw GitCommandError.timedOut(command: arguments, timeout: timeout)
-        }
-
-        if process.terminationStatus != 0 {
-            throw GitCommandError.gitFailed(
-                command: arguments,
-                status: process.terminationStatus,
-                stderr: err.trimmingCharacters(in: .whitespacesAndNewlines)
+        do {
+            return try ExternalProcess.run(
+                executable: "/usr/bin/git",
+                arguments: arguments,
+                currentDirectory: workingDirectory,
+                environment: [
+                    "PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin",
+                    "GIT_PAGER": "cat",
+                    "GIT_TERMINAL_PROMPT": "0",
+                    "LC_ALL": "C"
+                ],
+                timeout: timeout
             )
+        } catch ExternalProcessError.timedOut(let seconds) {
+            throw GitCommandError.timedOut(command: arguments, timeout: seconds)
+        } catch ExternalProcessError.failed(let status, let stderr) {
+            throw GitCommandError.gitFailed(command: arguments, status: status, stderr: stderr)
         }
-
-        return out
-    }
-}
-
-private final class TimeoutFlag: @unchecked Sendable {
-    private let lock = NSLock()
-    private var value = false
-
-    func mark() {
-        lock.lock()
-        value = true
-        lock.unlock()
-    }
-
-    var triggered: Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return value
     }
 }
