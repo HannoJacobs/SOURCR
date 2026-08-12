@@ -41,10 +41,12 @@ final class AppState {
     var isPanelVisible = false {
         didSet {
             guard isPanelVisible != oldValue else { return }
-            // Hidden panel: drop in-flight git/gh work so a wedged child cannot
-            // keep the coalesce latch / thread pool busy until the next open.
+            // Hidden panel: stop *scheduling* more Diff FSEvents work, but let any
+            // in-flight git/`gh` refresh finish (they have timeouts). Cancelling on
+            // every hide left the UI on a stale snapshot when the tree had changed
+            // mid-flight — the AGENTIC "4 dirty / Cursor clean" glance.
             if !isPanelVisible {
-                cancelBackgroundRefreshWork()
+                cancelFSDebounceWork()
             }
         }
     }
@@ -489,16 +491,12 @@ final class AppState {
         }
     }
 
-    /// Cancel Diff + Actions network/git work (panel hide / repo remove).
-    private func cancelBackgroundRefreshWork() {
+    /// Cancel only debounced FSEvents probes (panel hide). In-flight refreshes keep going.
+    private func cancelFSDebounceWork() {
         for task in fsDebounceTasks.values {
             task.cancel()
         }
         fsDebounceTasks.removeAll()
-        for id in Array(repoRefreshTasks.keys) {
-            cancelRepoRefresh(id)
-        }
-        cancelActionsWork()
     }
 
     private func cancelRepoRefresh(_ repoID: UUID) {

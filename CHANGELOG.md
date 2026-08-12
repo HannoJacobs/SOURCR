@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.9
+
+- Fixed a 1.8 regression that could show stale Diff counts (e.g. AGENTIC “4 changes” while Cursor/git were clean): under concurrent refresh, `GitService` waited on a `DispatchQueue.global` exit callback from another global-queue thread, so the pool could self-deadlock and every `git` call false-timed-out after 20s — cancelling mid-flight then left the last good snapshot on screen.
+- Live evidence from 1.8 logs: stretches of panel-open with **no** Diff snapshot lines, plus repeated `git remote get-url origin timed out after 20s` on repos where the same command finishes in ~10ms from a shell.
+- `GitService.run` now captures stdout/stderr via temp files (not Pipes) and waits on the caller thread with a private-queue watchdog for terminate — avoids both the large-output pipe-buffer deadlock and the 1.8 GCD “wait for another pool thread to signal exit” false-timeout.
+- Softened panel-hide cancellation: hiding the panel still cancels debounced FSEvents probes (no background Diff spam), but in-flight Diff/`gh` refreshes are allowed to finish and update the cache so a quick glance cannot freeze yesterday’s dirty count until the next lucky poll.
+- Repo-remove still cancels that repo’s in-flight Diff refresh; Actions coalesce + `gh` timeouts from 1.8 remain.
+- Still read-only: only process-wait / panel-hide scheduling changed around existing read-only git and `gh` probes.
+- Added a regression test that runs 24 concurrent `loadSnapshot` calls and asserts they finish well under the timeout (guards the false-timeout / pool-deadlock class).
+- Kept the 1.8 large-`-uall` pipe-drain test; both deadlock classes are now covered.
+- Packaging / full-send: bump CFBundle version to `1.9`, ship `SOURCR.dmg` on GitHub release `v1.9`, and reinstall `/Applications/SOURCR.app` with launch-log proof for version/build `1.9`.
+
 ## 1.8
 
 - Fixed a production deadlock that made SOURCR need repeated quits while watching Actions/CD: `GitService` called `waitUntilExit()` **before** draining stdout/stderr, so a large `git status -uall` (pipe output ≳64KB) blocked git on write and SOURCR on wait forever.

@@ -28,6 +28,7 @@ Menu bar icon
 - Pin (next to Refresh) keeps the panel in front while you work in other apps; unpin restores normal click-away dismiss
 - Panel height follows open Diff/Actions content (up to a max) so collapsed repos don’t leave a tall empty window
 - Git/`gh` child processes drain pipes while running and time out (so a huge `git status -uall` or stuck `gh` cannot freeze refreshes until quit)
+- In-flight Diff/`gh` refreshes are allowed to finish after the panel hides, so a quick open/close cannot leave a stale dirty count on screen
 
 ## What it never does
 

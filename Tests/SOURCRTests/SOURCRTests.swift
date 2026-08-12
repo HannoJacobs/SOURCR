@@ -29,6 +29,33 @@ struct GitServiceHardeningTests {
         #expect(elapsed < 15, "status should complete well under the \(Int(GitService.commandTimeout))s timeout")
     }
 
+    @Test func concurrentFastGitCommandsDoNotFalseTimeout() async throws {
+        // Repro of the 1.8 false-timeout: many overlapping refreshes blocked pool
+        // threads waiting for other pool threads to signal process exit, so even
+        // `git rev-parse` appeared to hit the 20s ceiling.
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("sourcr-concurrent-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        try runGit(in: root.path, ["init"])
+        try Data("hello\n".utf8).write(to: root.appendingPathComponent("README.md"))
+        try runGit(in: root.path, ["add", "README.md"])
+        try runGit(in: root.path, ["-c", "user.email=sourcr-test@example.com", "-c", "user.name=SOURCR Test", "commit", "-m", "init"])
+
+        let started = Date()
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            for _ in 0..<24 {
+                group.addTask {
+                    _ = try GitService.loadSnapshot(repoPath: root.path)
+                }
+            }
+            try await group.waitForAll()
+        }
+        let elapsed = Date().timeIntervalSince(started)
+        #expect(elapsed < 10, "24 concurrent status calls should not false-timeout (elapsed=\(elapsed)s)")
+    }
+
     private func runGit(in workingDirectory: String, _ arguments: [String]) throws {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")

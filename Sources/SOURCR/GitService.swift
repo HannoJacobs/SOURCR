@@ -192,6 +192,8 @@ enum GitService {
         }
     }
 
+    private static let watchdogQueue = DispatchQueue(label: "com.sourcr.git.watchdog")
+
     @discardableResult
     private static func run(
         in workingDirectory: String,
@@ -206,6 +208,23 @@ enum GitService {
             throw GitCommandError.invalidOutput("Blocked non-readonly git subcommand: \(head)")
         }
 
+        // Capture stdout/stderr in temp files instead of Pipes. Pipes need concurrent
+        // drains to avoid the ~64KB buffer deadlock, and draining via GCD while also
+        // waiting for exit on the same pool caused 1.8's false 20s timeouts. Files
+        // sidestep both failure modes.
+        let fm = FileManager.default
+        let outURL = fm.temporaryDirectory.appendingPathComponent("sourcr-git-out-\(UUID().uuidString)")
+        let errURL = fm.temporaryDirectory.appendingPathComponent("sourcr-git-err-\(UUID().uuidString)")
+        fm.createFile(atPath: outURL.path, contents: nil)
+        fm.createFile(atPath: errURL.path, contents: nil)
+        defer {
+            try? fm.removeItem(at: outURL)
+            try? fm.removeItem(at: errURL)
+        }
+
+        let outHandle = try FileHandle(forWritingTo: outURL)
+        let errHandle = try FileHandle(forWritingTo: errURL)
+
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
         process.arguments = arguments
@@ -216,63 +235,39 @@ enum GitService {
             "GIT_TERMINAL_PROMPT": "0",
             "LC_ALL": "C"
         ]
+        process.standardOutput = outHandle
+        process.standardError = errHandle
 
-        let stdout = Pipe()
-        let stderr = Pipe()
-        process.standardOutput = stdout
-        process.standardError = stderr
-
-        // Read pipes concurrently *before* waiting for exit. Waiting first deadlocks
-        // when porcelain/`-uall` output exceeds the ~64KB pipe buffer (git blocks on
-        // write; we block on waitUntilExit and never drain).
-        let group = DispatchGroup()
-        let dataLock = NSLock()
-        var outData = Data()
-        var errData = Data()
-
-        group.enter()
-        DispatchQueue.global(qos: .utility).async {
-            let data = stdout.fileHandleForReading.readDataToEndOfFile()
-            dataLock.lock()
-            outData = data
-            dataLock.unlock()
-            group.leave()
+        let timedOutFlag = TimeoutFlag()
+        let watchdog = DispatchSource.makeTimerSource(queue: watchdogQueue)
+        watchdog.setEventHandler {
+            timedOutFlag.mark()
+            if process.isRunning {
+                process.terminate()
+            }
         }
-
-        group.enter()
-        DispatchQueue.global(qos: .utility).async {
-            let data = stderr.fileHandleForReading.readDataToEndOfFile()
-            dataLock.lock()
-            errData = data
-            dataLock.unlock()
-            group.leave()
-        }
+        watchdog.schedule(deadline: .now() + timeout)
+        watchdog.resume()
+        defer { watchdog.cancel() }
 
         try process.run()
+        process.waitUntilExit()
 
-        let exitBox = ExitSignal()
-        DispatchQueue.global(qos: .utility).async {
+        if process.isRunning {
+            kill(process.processIdentifier, SIGKILL)
             process.waitUntilExit()
-            exitBox.signal()
         }
 
-        if !exitBox.wait(timeout: timeout) {
-            process.terminate()
-            // Escalate if terminate is ignored (stuck uninterruptible IO).
-            if !exitBox.wait(timeout: 2) {
-                kill(process.processIdentifier, SIGKILL)
-                _ = exitBox.wait(timeout: 2)
-            }
-            _ = group.wait(timeout: .now() + 1)
+        // Close writer ends before reading the files back.
+        try? outHandle.close()
+        try? errHandle.close()
+
+        let out = (try? String(contentsOf: outURL, encoding: .utf8)) ?? ""
+        let err = (try? String(contentsOf: errURL, encoding: .utf8)) ?? ""
+
+        if timedOutFlag.triggered {
             throw GitCommandError.timedOut(command: arguments, timeout: timeout)
         }
-
-        _ = group.wait(timeout: .now() + 5)
-
-        dataLock.lock()
-        let out = String(data: outData, encoding: .utf8) ?? ""
-        let err = String(data: errData, encoding: .utf8) ?? ""
-        dataLock.unlock()
 
         if process.terminationStatus != 0 {
             throw GitCommandError.gitFailed(
@@ -286,15 +281,19 @@ enum GitService {
     }
 }
 
-/// One-shot waitable signal for process exit (avoids busy-looping the caller).
-private final class ExitSignal: @unchecked Sendable {
-    private let semaphore = DispatchSemaphore(value: 0)
+private final class TimeoutFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
 
-    func signal() {
-        semaphore.signal()
+    func mark() {
+        lock.lock()
+        value = true
+        lock.unlock()
     }
 
-    func wait(timeout: TimeInterval) -> Bool {
-        semaphore.wait(timeout: .now() + timeout) == .success
+    var triggered: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return value
     }
 }
