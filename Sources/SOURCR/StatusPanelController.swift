@@ -12,8 +12,11 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
     private var pendingPanelResize: Task<Void, Never>?
     private var panelResizeGeneration = 0
 
-    /// Stable screen X of the panel's right edge while visible.
+    /// Captured when the panel opens; reused for every Diff↔Actions / height resize
+    /// so we never re-resolve against `NSScreen.main` (focus screen ≠ menu-bar screen).
     private var anchoredMaxX: CGFloat?
+    private var anchoredTopY: CGFloat?
+    private var anchoredVisibleFrame: NSRect?
 
     init(appState: AppState) {
         self.appState = appState
@@ -62,7 +65,7 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
         }
         guard panel != nil else { return }
 
-        anchoredMaxX = preferredAnchorMaxX()
+        captureAnchorFromStatusItem()
         applyFrame()
         panel?.level = appState.isPanelPinned ? .floating : .statusBar
         panel?.orderFrontRegardless()
@@ -83,12 +86,12 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
         panelResizeGeneration += 1
         removeOutsideClickMonitor()
         panel?.orderOut(nil)
-        anchoredMaxX = nil
+        clearAnchor()
         appState.isPanelVisible = false
         AppDiagnostics.info(.lifecycle, "panel hidden")
     }
 
-    /// Keep the right edge fixed when diff expands/collapses.
+    /// Keep the right edge fixed when diff expands/collapses / Diff↔Actions height changes.
     func syncPanelSize() {
         guard isVisible else { return }
         panelResizeGeneration += 1
@@ -107,30 +110,61 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
             else { return }
 
             self.pendingPanelResize = nil
-            if self.anchoredMaxX == nil {
-                self.anchoredMaxX = self.preferredAnchorMaxX()
+            // Do not re-capture the anchor here — mode switches / body-height
+            // updates must keep the open-time status-item screen, not jump to
+            // whichever display currently owns keyboard focus (`NSScreen.main`).
+            if self.anchoredMaxX == nil || self.anchoredTopY == nil || self.anchoredVisibleFrame == nil {
+                self.captureAnchorFromStatusItem()
             }
             self.applyFrame()
         }
+    }
+
+    private func clearAnchor() {
+        anchoredMaxX = nil
+        anchoredTopY = nil
+        anchoredVisibleFrame = nil
+    }
+
+    /// Pin geometry to the status-item's display for the whole open session.
+    private func captureAnchorFromStatusItem() {
+        if let button = statusItem?.button, let window = button.window {
+            let buttonRect = button.convert(button.bounds, to: nil)
+            let screenRect = window.convertToScreen(buttonRect)
+            anchoredMaxX = screenRect.midX + SOURCRLayout.scmWidth / 2
+            anchoredTopY = screenRect.minY - 4
+            // Prefer the button window's screen; fall back to the screen that
+            // contains the icon. Never use `NSScreen.main` (focus screen).
+            let screen = window.screen
+                ?? NSScreen.screens.first(where: { $0.frame.intersects(screenRect) })
+                ?? NSScreen.screens.first
+            anchoredVisibleFrame = screen?.visibleFrame
+            return
+        }
+
+        // Menu bar lives on screens[0], not necessarily `NSScreen.main`.
+        let screen = NSScreen.screens.first
+        anchoredVisibleFrame = screen?.visibleFrame
+        anchoredMaxX = (screen?.visibleFrame.maxX ?? 800) - 16
+        anchoredTopY = (screen?.visibleFrame.maxY ?? 800) - 8
     }
 
     private func applyFrame() {
         guard let panel else { return }
         let width = appState.isExpanded ? SOURCRLayout.expandedWidth : SOURCRLayout.scmWidth
         var height = appState.panelHeight
-        let maxX = anchoredMaxX ?? preferredAnchorMaxX()
-        let topY = preferredTopY()
+        let maxX = anchoredMaxX ?? 800
+        let topY = anchoredTopY ?? 800
+        let visible = anchoredVisibleFrame
 
-        if let screen = statusItem?.button?.window?.screen ?? NSScreen.main {
-            let visible = screen.visibleFrame
+        if let visible {
             // Never taller than the visible display under the menu bar.
             height = min(height, max(SOURCRLayout.minPanelHeight, visible.height - 16))
         }
 
         var origin = NSPoint(x: maxX - width, y: topY - height)
 
-        if let screen = statusItem?.button?.window?.screen ?? NSScreen.main {
-            let visible = screen.visibleFrame
+        if let visible {
             if origin.x + width > visible.maxX - 8 {
                 origin.x = visible.maxX - width - 8
             }
@@ -148,30 +182,6 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
         // contentView auto-fills the window. AppKit will redraw on its normal pass;
         // forcing display here would synchronously traverse the SwiftUI hierarchy.
         panel.setFrame(targetFrame, display: false)
-    }
-
-    private func preferredAnchorMaxX() -> CGFloat {
-        if let button = statusItem?.button, let window = button.window {
-            let buttonRect = button.convert(button.bounds, to: nil)
-            let screenRect = window.convertToScreen(buttonRect)
-            return screenRect.midX + SOURCRLayout.scmWidth / 2
-        }
-        if let screen = NSScreen.main {
-            return screen.visibleFrame.maxX - 16
-        }
-        return 800
-    }
-
-    private func preferredTopY() -> CGFloat {
-        if let button = statusItem?.button, let window = button.window {
-            let buttonRect = button.convert(button.bounds, to: nil)
-            let screenRect = window.convertToScreen(buttonRect)
-            return screenRect.minY - 4
-        }
-        if let screen = NSScreen.main {
-            return screen.visibleFrame.maxY - 8
-        }
-        return 800
     }
 
     private func buildPanel() {

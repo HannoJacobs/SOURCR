@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.11
+
+- Fixed a multi-monitor jump: with two (or more) displays attached, switching Diff ↔ Actions (or any panel height resize) could move the menu-bar panel onto the other screen.
+- Root cause: `StatusPanelController.applyFrame` clamped the panel to `statusItem.button.window.screen ?? NSScreen.main`. Apple’s `NSScreen.main` is the **keyboard-focus** display, not the menu-bar display — after clicking inside the panel, clamp math could use the wrong `visibleFrame` and yank `origin.x` across screens.
+- On `show()`, SOURCR now captures a sticky open-session anchor: right-edge X, top Y, and the status-item screen’s `visibleFrame` (from the button window’s screen, else the screen intersecting the icon, else `NSScreen.screens.first` — never `NSScreen.main`).
+- Diff ↔ Actions / expand / body-height `syncPanelSize` resizes reuse that captured geometry only; they do not re-resolve the screen from focus.
+- Hide clears the anchor so the next open re-reads the live status-item position (menu bar moved, display arrangement changed, etc.).
+- Fallback when the status item has no window yet uses `NSScreen.screens.first` (menu-bar screen) rather than `NSScreen.main`.
+- No change to read-only git/`gh` behavior, refresh cadence, or Diff/Actions data paths — panel positioning only.
+- Packaging / full-send: bump CFBundle version to `1.11`, ship `SOURCR.dmg` on GitHub release `v1.11`, and reinstall `/Applications/SOURCR.app` with launch-log proof for version/build `1.11`.
+
 ## 1.10
 
 - Unified `git` and `gh` onto one `ExternalProcess` runner (temp-file stdout/stderr + caller-thread `waitUntilExit` + private watchdog timeout) so Actions no longer keeps the older Pipe/`DispatchQueue.global` drain path that 1.8/1.9 already rejected for git.

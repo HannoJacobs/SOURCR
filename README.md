@@ -29,6 +29,7 @@ Menu bar icon
 - Panel height follows open Diff/Actions content (up to a max) so collapsed repos don’t leave a tall empty window
 - Git/`gh` child processes drain pipes while running and time out (so a huge `git status -uall` or stuck `gh` cannot freeze refreshes until quit)
 - In-flight Diff/`gh` refreshes are allowed to finish after the panel hides, so a quick open/close cannot leave a stale dirty count on screen
+- Panel stays on the status-item’s display across Diff ↔ Actions resizes (does not follow `NSScreen.main` / focus to another monitor)
 
 ## What it never does
 
