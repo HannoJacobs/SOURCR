@@ -1,0 +1,806 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SOURCR — Actions panel mockups</title>
+<style>
+  :root {
+    --bg: #1e1e1e;
+    --bg-elev: #252526;
+    --bg-hover: #2a2d2e;
+    --bg-sel: #094771;
+    --line: #3c3c3c;
+    --text: #cccccc;
+    --muted: #858585;
+    --dim: #6a6a6a;
+    --green: #3fb950;
+    --red: #f85149;
+    --yellow: #d29922;
+    --blue: #58a6ff;
+    --orange: #db6d28;
+    --panel-w: 340px;
+    --panel-h: 560px;
+    --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: var(--font);
+    background: #0f1115;
+    color: var(--text);
+    min-height: 100vh;
+    padding: 32px 28px 64px;
+  }
+
+  h1 {
+    font-size: 22px;
+    font-weight: 620;
+    letter-spacing: -0.02em;
+    margin: 0 0 6px;
+  }
+  .lede {
+    color: var(--muted);
+    max-width: 820px;
+    font-size: 14px;
+    line-height: 1.45;
+    margin: 0 0 8px;
+  }
+  .spike {
+    display: inline-flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    align-items: center;
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 28px;
+  }
+  .spike code {
+    font-family: var(--mono);
+    background: #1a1d24;
+    border: 1px solid #2a2f3a;
+    padding: 2px 7px;
+    border-radius: 4px;
+    color: #c9d1d9;
+  }
+  .dot-live {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--yellow);
+    box-shadow: 0 0 0 3px rgba(210,153,34,.18);
+    animation: pulse 1.4s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    50% { opacity: .45; }
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+    gap: 28px;
+    align-items: start;
+  }
+
+  .option {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .option h2 {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 650;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: #9aa4b2;
+  }
+  .option p {
+    margin: 0;
+    font-size: 13px;
+    color: var(--muted);
+    line-height: 1.4;
+    min-height: 54px;
+  }
+  .tag {
+    display: inline-block;
+    font-size: 11px;
+    padding: 2px 7px;
+    border-radius: 999px;
+    border: 1px solid #334155;
+    color: #94a3b8;
+    margin-right: 6px;
+  }
+  .tag.rec {
+    border-color: rgba(63,185,80,.4);
+    color: var(--green);
+  }
+
+  /* Fake menu-bar panel */
+  .panel {
+    width: var(--panel-w);
+    height: var(--panel-h);
+    background: var(--bg);
+    border: 1px solid #333;
+    border-radius: 10px;
+    box-shadow: 0 18px 50px rgba(0,0,0,.45);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    position: relative;
+  }
+  .panel.wide { width: 720px; }
+
+  .chrome {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--line);
+    background: var(--bg-elev);
+    flex-shrink: 0;
+  }
+  .seg {
+    display: inline-flex;
+    background: #141414;
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    padding: 2px;
+    gap: 2px;
+  }
+  .seg button {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    font: 600 11px/1 var(--font);
+    padding: 6px 10px;
+    border-radius: 5px;
+    cursor: default;
+  }
+  .seg button.on {
+    background: #3a3d41;
+    color: #fff;
+  }
+  .chrome .spacer { flex: 1; }
+  .chrome .meta {
+    font-size: 11px;
+    color: var(--dim);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .filters {
+    display: flex;
+    gap: 6px;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--line);
+    flex-shrink: 0;
+  }
+  .chip {
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    color: var(--muted);
+    background: transparent;
+  }
+  .chip.on {
+    border-color: #4b5563;
+    color: #e5e7eb;
+    background: #2b2f36;
+  }
+  .chip .n {
+    font-variant-numeric: tabular-nums;
+    color: var(--dim);
+    margin-left: 4px;
+  }
+
+  .scroll {
+    flex: 1;
+    overflow: auto;
+    padding: 4px 0 8px;
+  }
+  .scroll::-webkit-scrollbar { width: 8px; }
+  .scroll::-webkit-scrollbar-thumb { background: #3a3a3a; border-radius: 4px; }
+
+  .repo-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px 4px;
+    font-size: 11px;
+    font-weight: 650;
+    color: #e5e7eb;
+    letter-spacing: .01em;
+  }
+  .repo-head .path {
+    color: var(--dim);
+    font-weight: 500;
+    font-family: var(--mono);
+    font-size: 10px;
+  }
+
+  .branch-row, .run-row, .step-row {
+    display: grid;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 12px;
+    font-size: 12px;
+    border-left: 2px solid transparent;
+  }
+  .branch-row:hover, .run-row:hover, .step-row:hover {
+    background: var(--bg-hover);
+  }
+  .run-row.sel {
+    background: var(--bg-sel);
+    border-left-color: var(--blue);
+  }
+
+  .status {
+    width: 14px;
+    height: 14px;
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+  }
+  .status svg { width: 14px; height: 14px; display: block; }
+  .spin {
+    width: 12px; height: 12px;
+    border: 1.5px solid rgba(210,153,34,.25);
+    border-top-color: var(--yellow);
+    border-radius: 50%;
+    animation: spin .8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .branch-row { grid-template-columns: 14px 1fr auto; }
+  .run-row { grid-template-columns: 14px 1fr auto; }
+  .name { color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sub {
+    color: var(--muted);
+    font-size: 11px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 1px;
+  }
+  .time {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .time.hot { color: var(--yellow); }
+  .time.bad { color: var(--red); }
+  .time.ok { color: var(--green); }
+
+  .wf-badge {
+    display: inline-block;
+    font-size: 10px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: #30363d;
+    color: #c9d1d9;
+    margin-right: 4px;
+  }
+  .wf-badge.cd { background: rgba(219,109,40,.18); color: #ffa657; }
+  .wf-badge.ci { background: rgba(88,166,255,.14); color: #79c0ff; }
+
+  .section-label {
+    padding: 10px 12px 4px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
+
+  /* Option A detail expand */
+  .detail {
+    margin: 0 10px 8px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #181818;
+    overflow: hidden;
+  }
+  .detail-head {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    align-items: flex-start;
+  }
+  .detail-head .title { font-size: 12px; font-weight: 600; }
+  .progress-track {
+    height: 3px;
+    background: #30363d;
+    margin: 0 10px 8px;
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%;
+    width: 23%;
+    background: linear-gradient(90deg, #d29922, #e3b341);
+  }
+  .step-row {
+    grid-template-columns: 14px 1fr auto;
+    padding: 4px 10px;
+    font-size: 11px;
+  }
+  .step-row .name { color: var(--muted); }
+  .step-row.current .name { color: #e5e7eb; }
+  .step-row.pending .name { color: #555; }
+  .more {
+    padding: 6px 10px 8px;
+    font-size: 11px;
+    color: var(--dim);
+  }
+
+  /* Option B split */
+  .split-body {
+    display: grid;
+    grid-template-rows: 1fr 1.35fr;
+    flex: 1;
+    min-height: 0;
+  }
+  .split-body > div {
+    min-height: 0;
+    overflow: auto;
+  }
+  .split-body > div + div {
+    border-top: 1px solid var(--line);
+  }
+  .mini-scm .file {
+    display: flex;
+    gap: 8px;
+    padding: 4px 12px;
+    font-size: 12px;
+    color: var(--muted);
+    font-family: var(--mono);
+  }
+  .mini-scm .m { color: #e2c08d; width: 10px; }
+  .mini-scm .a { color: #73c991; width: 10px; }
+
+  /* Option C branch board + wide detail */
+  .wide-body {
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    flex: 1;
+    min-height: 0;
+  }
+  .wide-body > * { min-height: 0; overflow: auto; }
+  .wide-body .right {
+    border-left: 1px solid var(--line);
+    background: #181818;
+  }
+  .job-title {
+    padding: 12px 14px 6px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .job-meta {
+    padding: 0 14px 10px;
+    font-size: 11px;
+    color: var(--muted);
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .phase {
+    margin: 0 12px 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .phase-h {
+    display: flex;
+    justify-content: space-between;
+    padding: 7px 10px;
+    background: #1f1f1f;
+    font-size: 11px;
+    font-weight: 650;
+  }
+  .phase-h .st { font-weight: 500; color: var(--muted); }
+
+  .footer {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
+    border-top: 1px solid var(--line);
+    background: var(--bg-elev);
+    flex-shrink: 0;
+  }
+  .footer button {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    font: 500 11px var(--font);
+    padding: 4px 6px;
+    border-radius: 4px;
+  }
+  .footer button:hover { background: var(--bg-hover); color: var(--text); }
+  .footer .spacer { flex: 1; }
+
+  .notes {
+    margin-top: 40px;
+    max-width: 980px;
+    border-top: 1px solid #243044;
+    padding-top: 20px;
+  }
+  .notes h2 {
+    font-size: 15px;
+    margin: 0 0 10px;
+  }
+  .notes ul {
+    margin: 0;
+    padding-left: 18px;
+    color: #a7b0bd;
+    font-size: 13px;
+    line-height: 1.55;
+  }
+  .notes li { margin-bottom: 6px; }
+  .notes strong { color: #e5e7eb; font-weight: 620; }
+</style>
+</head>
+<body>
+  <h1>SOURCR Actions — HTML mockups</h1>
+  <p class="lede">
+    Spike against live GitHub Actions on <code>hb-innovation-lab/PPA-Wrapper</code>
+    (local folder Practice-Partner-Agent). Three layout options for a read-only CD watch surface
+    inside the existing menu-bar panel.
+  </p>
+  <div class="spike">
+    <span class="dot-live"></span>
+    <span>Live at capture:</span>
+    <code>Root Deploy Dev</code>
+    <code>develop</code>
+    <code>~9m29s</code>
+    <code>step 23 · Deploy thin shadow clinical-cache Job…</code>
+  </div>
+
+  <div class="grid">
+
+    <!-- ========== OPTION A ========== -->
+    <div class="option">
+      <h2>Option A — Mode toggle + run list</h2>
+      <p>
+        <span class="tag rec">Closest to your ask</span>
+        Top segmented control: Diff / Actions. Actions is a filterable run feed across watched remotes,
+        with inline expand for the active long CD job.
+      </p>
+
+      <div class="panel" aria-label="Option A mockup">
+        <div class="chrome">
+          <div class="seg">
+            <button type="button">Diff</button>
+            <button type="button" class="on">Actions</button>
+          </div>
+          <div class="spacer"></div>
+          <div class="meta">PPA-Wrapper · auto</div>
+        </div>
+        <div class="filters">
+          <span class="chip on">Running <span class="n">1</span></span>
+          <span class="chip">Failed <span class="n">3</span></span>
+          <span class="chip">Passed</span>
+          <span class="chip">All</span>
+        </div>
+        <div class="scroll">
+          <div class="repo-head">
+            PPA-Wrapper
+            <span class="path">origin/develop</span>
+          </div>
+
+          <div class="section-label">In progress</div>
+          <div class="run-row sel">
+            <div class="status"><div class="spin" title="in progress"></div></div>
+            <div>
+              <div class="name"><span class="wf-badge cd">CD</span>Root Deploy Dev</div>
+              <div class="sub">develop · push · PR #646 merge</div>
+            </div>
+            <div class="time hot">9m29s</div>
+          </div>
+
+          <div class="detail">
+            <div class="detail-head">
+              <div>
+                <div class="title">Shadow Gate Then Deploy…</div>
+                <div class="sub">22 done · now: thin shadow clinical-cache Job</div>
+              </div>
+              <div class="time hot">live</div>
+            </div>
+            <div class="progress-track"><div class="progress-fill"></div></div>
+            <div class="step-row">
+              <div class="status"><svg viewBox="0 0 16 16"><path fill="#3fb950" d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.75.75 0 0 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z"/></svg></div>
+              <div class="name">Build and push root image</div>
+              <div class="time">1m30s</div>
+            </div>
+            <div class="step-row">
+              <div class="status"><svg viewBox="0 0 16 16"><path fill="#3fb950" d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.75.75 0 0 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z"/></svg></div>
+              <div class="name">Deploy shadow wrapper and scheduler</div>
+              <div class="time">2m04s</div>
+            </div>
+            <div class="step-row current">
+              <div class="status"><div class="spin"></div></div>
+              <div class="name">Deploy thin shadow clinical-cache Job…</div>
+              <div class="time hot">~2m+</div>
+            </div>
+            <div class="step-row pending">
+              <div class="status"></div>
+              <div class="name">Seed / assert thin shadow Job</div>
+              <div class="time">—</div>
+            </div>
+            <div class="step-row pending">
+              <div class="status"></div>
+              <div class="name">… then live promote + browser proofs</div>
+              <div class="time">—</div>
+            </div>
+            <div class="more">~70 steps remaining · typically 25–60+ min for full CD</div>
+          </div>
+
+          <div class="section-label">Failed recently</div>
+          <div class="run-row">
+            <div class="status"><svg viewBox="0 0 16 16"><path fill="#f85149" d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.75.75 0 1 1 1.06 1.06L9.06 8l3.22 3.22a.75.75 0 1 1-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 0 1-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06Z"/></svg></div>
+            <div>
+              <div class="name"><span class="wf-badge cd">CD</span>Root Deploy Dev</div>
+              <div class="sub">develop · 25m56s · earlier today</div>
+            </div>
+            <div class="time bad">fail</div>
+          </div>
+          <div class="run-row">
+            <div class="status"><svg viewBox="0 0 16 16"><path fill="#f85149" d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.75.75 0 1 1 1.06 1.06L9.06 8l3.22 3.22a.75.75 0 1 1-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 0 1-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06Z"/></svg></div>
+            <div>
+              <div class="name"><span class="wf-badge cd">CD</span>Root Deploy Prod</div>
+              <div class="sub">main · 1h0m14s · earlier today</div>
+            </div>
+            <div class="time bad">fail</div>
+          </div>
+
+          <div class="section-label">Passed</div>
+          <div class="run-row">
+            <div class="status"><svg viewBox="0 0 16 16"><path fill="#3fb950" d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.75.75 0 0 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z"/></svg></div>
+            <div>
+              <div class="name"><span class="wf-badge ci">CI</span>Root CI</div>
+              <div class="sub">hanno/cut-shadow… · PR · 1m52s</div>
+            </div>
+            <div class="time ok">pass</div>
+          </div>
+          <div class="run-row">
+            <div class="status"><svg viewBox="0 0 16 16"><path fill="#3fb950" d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.75.75 0 0 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z"/></svg></div>
+            <div>
+              <div class="name"><span class="wf-badge">misc</span>MLR Demo SQL Drift Check</div>
+              <div class="sub">develop · 1m10s</div>
+            </div>
+            <div class="time ok">pass</div>
+          </div>
+        </div>
+        <div class="footer">
+          <button type="button">Refresh</button>
+          <button type="button">Add repo</button>
+          <div class="spacer"></div>
+          <button type="button">Settings</button>
+          <button type="button">Quit</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========== OPTION B ========== -->
+    <div class="option">
+      <h2>Option B — Split: Diff top / Actions bottom</h2>
+      <p>
+        <span class="tag">Always visible</span>
+        Keep SCM changes in the top half; Actions always peek below. Better when you want both at once;
+        worse when CD needs vertical space for steps.
+      </p>
+
+      <div class="panel" aria-label="Option B mockup">
+        <div class="chrome">
+          <div class="meta" style="font-weight:650;color:#e5e7eb">PPA-Wrapper</div>
+          <div class="spacer"></div>
+          <div class="meta">develop</div>
+        </div>
+        <div class="split-body">
+          <div class="mini-scm">
+            <div class="section-label">Changes</div>
+            <div class="file"><span class="m">M</span>deploy/dev.yml</div>
+            <div class="file"><span class="m">M</span>services/clinical_cache/job.py</div>
+            <div class="file"><span class="a">A</span>tests/test_shadow_gate.py</div>
+            <div class="file"><span class="m">M</span>README.md</div>
+          </div>
+          <div>
+            <div class="section-label">Actions · Running / Failed</div>
+            <div class="run-row sel">
+              <div class="status"><div class="spin"></div></div>
+              <div>
+                <div class="name"><span class="wf-badge cd">CD</span>Root Deploy Dev</div>
+                <div class="sub">develop · step 23/99 · clinical-cache Job</div>
+              </div>
+              <div class="time hot">9m29s</div>
+            </div>
+            <div class="run-row">
+              <div class="status"><svg viewBox="0 0 16 16"><path fill="#f85149" d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.75.75 0 1 1 1.06 1.06L9.06 8l3.22 3.22a.75.75 0 1 1-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 0 1-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06Z"/></svg></div>
+              <div>
+                <div class="name"><span class="wf-badge cd">CD</span>Root Deploy Dev</div>
+                <div class="sub">develop · failed 25m56s</div>
+              </div>
+              <div class="time bad">fail</div>
+            </div>
+            <div class="run-row">
+              <div class="status"><svg viewBox="0 0 16 16"><path fill="#3fb950" d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.75.75 0 0 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z"/></svg></div>
+              <div>
+                <div class="name"><span class="wf-badge ci">CI</span>Root CI</div>
+                <div class="sub">PR branch · 1m52s</div>
+              </div>
+              <div class="time ok">pass</div>
+            </div>
+          </div>
+        </div>
+        <div class="footer">
+          <button type="button">Refresh</button>
+          <button type="button">Add repo</button>
+          <div class="spacer"></div>
+          <button type="button">Settings</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========== OPTION C ========== -->
+    <div class="option" style="grid-column: 1 / -1;">
+      <h2>Option C — Branch board + expanded step theater</h2>
+      <p>
+        <span class="tag">Best for hour-long CD</span>
+        Left: per-branch aggregate ✓ / ✗ / ● across watched remotes.
+        Selecting a branch (or a run) expands leftward into a step theater — same gesture as Diff today.
+        This is where long Root Deploy Dev jobs become watchable without the GitHub tab.
+      </p>
+
+      <div class="panel wide" aria-label="Option C mockup">
+        <div class="chrome">
+          <div class="seg">
+            <button type="button">Diff</button>
+            <button type="button" class="on">Actions</button>
+          </div>
+          <div class="spacer"></div>
+          <div class="meta">click branch → expand steps (like file → diff)</div>
+        </div>
+        <div class="wide-body">
+          <div>
+            <div class="repo-head">PPA-Wrapper <span class="path">github.com/hb-innovation-lab</span></div>
+            <div class="section-label">Branches</div>
+
+            <div class="branch-row" style="background:var(--bg-sel);border-left-color:var(--blue)">
+              <div class="status"><div class="spin"></div></div>
+              <div>
+                <div class="name">develop</div>
+                <div class="sub">Root Deploy Dev · in progress</div>
+              </div>
+              <div class="time hot">9m29s</div>
+            </div>
+            <div class="branch-row">
+              <div class="status"><svg viewBox="0 0 16 16"><path fill="#f85149" d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.75.75 0 1 1 1.06 1.06L9.06 8l3.22 3.22a.75.75 0 1 1-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 0 1-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06Z"/></svg></div>
+              <div>
+                <div class="name">main</div>
+                <div class="sub">Root Deploy Prod · last run failed</div>
+              </div>
+              <div class="time bad">1h00m</div>
+            </div>
+            <div class="branch-row">
+              <div class="status"><svg viewBox="0 0 16 16"><path fill="#3fb950" d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.75.75 0 0 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z"/></svg></div>
+              <div>
+                <div class="name">hanno/cut-shadow-clinical-cache…</div>
+                <div class="sub">Root CI · passed</div>
+              </div>
+              <div class="time ok">1m52s</div>
+            </div>
+
+            <div class="section-label">Watched remotes</div>
+            <div class="run-row">
+              <div class="status"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="3" fill="#6a6a6a"/></svg></div>
+              <div>
+                <div class="name">+ Add GitHub remote</div>
+                <div class="sub">Resolve origin → owner/repo · auth via gh</div>
+              </div>
+              <div class="time"></div>
+            </div>
+          </div>
+
+          <div class="right">
+            <div class="job-title">Root Deploy Dev · develop</div>
+            <div class="job-meta">
+              <span>run 30371018188</span>
+              <span>push · PR #646</span>
+              <span class="time hot">elapsed 9m29s</span>
+              <span>job: Shadow Gate Then Deploy…</span>
+            </div>
+
+            <div class="phase">
+              <div class="phase-h">
+                <span>Shadow plane</span>
+                <span class="st" style="color:var(--yellow)">in progress</span>
+              </div>
+              <div class="step-row">
+                <div class="status"><svg viewBox="0 0 16 16"><path fill="#3fb950" d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.75.75 0 0 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z"/></svg></div>
+                <div class="name">Build/push backend + root images</div>
+                <div class="time">done</div>
+              </div>
+              <div class="step-row">
+                <div class="status"><svg viewBox="0 0 16 16"><path fill="#3fb950" d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.75.75 0 0 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z"/></svg></div>
+                <div class="name">Deploy shadow wrapper + scheduler</div>
+                <div class="time">done</div>
+              </div>
+              <div class="step-row current">
+                <div class="status"><div class="spin"></div></div>
+                <div class="name">Deploy thin shadow clinical-cache Job (1 task, paused trigger)</div>
+                <div class="time hot">now</div>
+              </div>
+              <div class="step-row pending">
+                <div class="status"></div>
+                <div class="name">Seed, execute, assert thin shadow Job</div>
+                <div class="time">queued</div>
+              </div>
+              <div class="step-row pending">
+                <div class="status"></div>
+                <div class="name">No-browser + browser shadow proofs</div>
+                <div class="time">queued</div>
+              </div>
+            </div>
+
+            <div class="phase">
+              <div class="phase-h">
+                <span>Live promote</span>
+                <span class="st">pending</span>
+              </div>
+              <div class="step-row pending">
+                <div class="status"></div>
+                <div class="name">Deploy live backend / wrapper / scheduler / clinical-cache</div>
+                <div class="time">—</div>
+              </div>
+              <div class="step-row pending">
+                <div class="status"></div>
+                <div class="name">Promote traffic + live browser proof</div>
+                <div class="time">—</div>
+              </div>
+            </div>
+
+            <div class="phase">
+              <div class="phase-h">
+                <span>Failure example (earlier run)</span>
+                <span class="st" style="color:var(--red)">failed · 25m56s</span>
+              </div>
+              <div class="step-row">
+                <div class="status"><svg viewBox="0 0 16 16"><path fill="#f85149" d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.75.75 0 1 1 1.06 1.06L9.06 8l3.22 3.22a.75.75 0 1 1-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 0 1-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06Z"/></svg></div>
+                <div class="name">Root Deploy Dev · develop · run 30367391294</div>
+                <div class="time bad">fail</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="footer">
+          <button type="button">Refresh</button>
+          <button type="button">Open on GitHub</button>
+          <button type="button">Add repo</button>
+          <div class="spacer"></div>
+          <button type="button">Settings</button>
+          <button type="button">Quit</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="notes">
+    <h2>Discussion points from the spike</h2>
+    <ul>
+      <li><strong>Data source:</strong> GitHub Actions API via <code>gh</code> auth (same account that already sees PPA-Wrapper). Local path → resolve <code>origin</code> → <code>owner/repo</code>. Azure remotes are out of scope unless we add ADO later.</li>
+      <li><strong>What to track by default:</strong> For this repo, CD is the pain (<code>Root Deploy Dev</code> / <code>Root Deploy Prod</code>, 25–60+ min). CI finishes in ~2 min. Filters for Running / Failed matter more than a full history dump.</li>
+      <li><strong>Branch rollup vs run list:</strong> Branch board (C) answers “is develop green?”; run list (A) answers “what is burning right now?”. Hybrid is natural: branch rows on the right, expand into steps like Diff.</li>
+      <li><strong>Step density:</strong> Live deploy has ~90+ steps. UI should collapse to phases / current±2 steps, not dump the full GitHub job log.</li>
+      <li><strong>Still read-only:</strong> Watch + open in browser. No cancel / re-run / approve from SOURCR unless you explicitly want that later.</li>
+      <li><strong>Menu-bar badge:</strong> Optional later — yellow spinner / red X on the status item when any watched CD is running or failed.</li>
+    </ul>
+  </div>
+</body>
+</html>
