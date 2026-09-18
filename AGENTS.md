@@ -12,7 +12,7 @@ A full send includes all of the following:
 4. Push the full change set to GitHub.
 5. Build the Release app artifact.
 6. Package the current `SOURCR.dmg`.
-7. Upload the current `SOURCR.dmg` to the live GitHub release path, as the personal account (see **GitHub Identity**).
+7. Upload the current `SOURCR.dmg` to the live GitHub release path (see **GitHub Identity** — this resolves automatically).
 8. Make sure the GitHub-hosted release state is live and that anything expected to update from GitHub is actually triggered for release, including the website/download path when applicable.
 9. Update the local DMG/build artifacts so this Mac is using the current shipped build, not a stale previous package.
 10. Install the built app to `/Applications/SOURCR.app` on this Mac.
@@ -32,25 +32,29 @@ Do not call something a full send if it only compiles, only ships a commit, only
 ## GitHub Identity
 
 This repo belongs to the **personal** account `HannoJacobs`, never the Healthbridge
-account `HannoJacobsHB`. Git itself is already correct — `origin` is SSH and uses the
-personal key — but the `gh` CLI picks its account from global state, so releases can
-land on the wrong identity or fail outright.
+account `HannoJacobsHB`. This is handled for you — `gh` resolves to the right account
+automatically anywhere under `~/Documents/Code/`, including from a non-interactive
+shell. You do not need to do anything.
 
-`~/Documents/Code/.envrc` already solves this: direnv exports `GH_TOKEN` for
-`HannoJacobs`, read live from `gh`'s keychain, for everything under that directory.
-Interactive shells get it automatically.
+How it works, so you do not undo it:
 
-**Non-interactive shells do not.** direnv hooks the shell prompt, which never fires
-under `zsh -c` / `bash -c`, so an agent running `gh` here silently acts as whatever
-account is globally active. Prefix every `gh` call in this repo with `direnv exec`:
+- `~/Documents/Code/.envrc` exports `GH_TOKEN` for `HannoJacobs`, read live from gh's
+  keychain. Nothing sensitive is stored in the file.
+- direnv only hooks the interactive shell *prompt*, so `zsh -c` / `bash -c` — every
+  coding agent, script and MCP server — never loaded it and silently fell through to
+  whatever account was globally active.
+- `~/.local/bin/gh` is a shim, ahead of Homebrew's gh on `PATH`. It applies whatever
+  `.envrc` governs the current directory, then execs the real gh. It holds no account
+  name and no path list: the `.envrc` files are the single source of truth, so a new
+  personal directory needs a new `.envrc`, not a shim edit.
 
-```bash
-direnv exec . gh release create vX.Y SOURCR.dmg --repo HannoJacobs/SOURCR ...
-```
+Confirm with `gh api user --jq .login` → `HannoJacobs` before any release step.
 
-Verify with `direnv exec . gh api user --jq .login` → `HannoJacobs` before any
-release step. Never run `gh auth switch` to work around this: it mutates the user's
-global account for every other repo on the machine, including his Healthbridge work.
+**Never run `gh auth switch` to fix an identity problem here.** It mutates the global
+account for every other repo on this machine, including Hanno's Healthbridge work. If
+gh reports the wrong account, the shim or the `.envrc` is broken — say so rather than
+reaching for global state. An explicit `GH_TOKEN` in the environment always wins over
+the shim, so a caller that deliberately chose an identity is left alone.
 
 ## Safety Invariant
 
