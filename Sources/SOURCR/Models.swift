@@ -381,12 +381,31 @@ enum ActionTiming {
 
 // MARK: - Branches (GitHub)
 
-/// Open pull request associated with a branch head.
+/// Lifecycle of the pull request whose head is a given branch.
+/// `draft` is only meaningful while open — a closed draft reads as closed, the way
+/// GitHub's own Branches page shows it.
+enum PullRequestState: Hashable {
+    case open
+    case draft
+    case merged
+    case closed
+
+    /// Maps GitHub's `PullRequestState` plus `isDraft` onto one flat state.
+    static func from(rawState: String, isDraft: Bool) -> PullRequestState {
+        switch rawState.uppercased() {
+        case "MERGED": return .merged
+        case "CLOSED": return .closed
+        default: return isDraft ? .draft : .open
+        }
+    }
+}
+
+/// The most recently updated pull request whose head is this branch, whatever its state.
 struct BranchPullRequest: Hashable {
     let number: Int
     let title: String
     let url: String
-    let isDraft: Bool
+    let state: PullRequestState
 }
 
 /// Remote branch metadata: divergence from the default branch, last commit, open PR.

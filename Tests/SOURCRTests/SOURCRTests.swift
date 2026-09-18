@@ -412,6 +412,43 @@ struct BranchBoardTests {
         #expect(rows[0].state == .running)
     }
 
+    @Test func aDeletedBranchDropsOffEvenWhileItsRunsRemain() {
+        // Merge a PR, GitHub deletes the branch, but its workflow runs stay in the
+        // history for days. Rows come from live refs, so the branch must disappear.
+        let snap = snapshot(
+            branches: [branch("develop", ageSeconds: 300, isDefault: true)],
+            runs: [
+                run("CI", branch: "develop", status: "completed", conclusion: "success", ageSeconds: 300),
+                run("CI", branch: "feat/merged-and-deleted", status: "completed", conclusion: "failure", ageSeconds: 600)
+            ]
+        )
+        let names = snap.branchActivities(repoID: repoID, window: .day, now: now).map(\.branch.name)
+        #expect(names == ["develop"])
+        #expect(!names.contains("feat/merged-and-deleted"))
+    }
+
+    @Test func pullRequestStateCoversOpenDraftMergedAndClosed() {
+        #expect(PullRequestState.from(rawState: "OPEN", isDraft: false) == .open)
+        #expect(PullRequestState.from(rawState: "OPEN", isDraft: true) == .draft)
+        #expect(PullRequestState.from(rawState: "MERGED", isDraft: false) == .merged)
+        #expect(PullRequestState.from(rawState: "CLOSED", isDraft: false) == .closed)
+        // A draft that was closed reads as closed, matching GitHub's Branches page.
+        #expect(PullRequestState.from(rawState: "CLOSED", isDraft: true) == .closed)
+        // A merged PR is never reported as draft.
+        #expect(PullRequestState.from(rawState: "MERGED", isDraft: true) == .merged)
+    }
+
+    @Test func branchCarriesItsPullRequestWhateverTheState() {
+        let pr = BranchPullRequest(number: 984, title: "Cards proof", url: "https://x/984", state: .merged)
+        let snap = snapshot(
+            branches: [branch("hanno/hea-1643-cards-proof", ageSeconds: 600, pr: pr)],
+            runs: []
+        )
+        let row = snap.branchActivities(repoID: repoID, window: .day, now: now)[0]
+        #expect(row.branch.pullRequest?.number == 984)
+        #expect(row.branch.pullRequest?.state == .merged)
+    }
+
     @Test func branchWithNoRunsReadsAsIdleNotGreen() {
         let snap = snapshot(branches: [branch("docs/typo", ageSeconds: 300)], runs: [])
         let row = snap.branchActivities(repoID: repoID, window: .day, now: now)[0]

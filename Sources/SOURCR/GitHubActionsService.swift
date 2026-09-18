@@ -167,6 +167,21 @@ enum GitHubActionsService {
             ? [:]
             : try await loadDivergence(remote: remote, branches: Array(recent))
 
+        // Non-fatal: a PR hiccup must not blank out divergence and the branch list too.
+        var pullRequests: [String: BranchPullRequest] = [:]
+        do {
+            pullRequests = try await loadPullRequestsByHeadBranch(remote: remote)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            AppDiagnostics.error(
+                .appState,
+                "pull request fetch failed repo=\(remote.slug) error=\(error.localizedDescription)"
+            )
+        }
+
+        // Only refs that still exist on the remote become rows, so a branch deleted after
+        // its PR merged drops off the board even while its workflow runs are still listed.
         let branches = heads.heads.map { head -> BranchInfo in
             let d = divergence[head.name]
             return BranchInfo(
@@ -175,7 +190,7 @@ enum GitHubActionsService {
                 ahead: d?.ahead ?? 0,
                 behind: d?.behind ?? 0,
                 isDefault: head.name == base,
-                pullRequest: head.pullRequest,
+                pullRequest: pullRequests[head.name],
                 hasDivergence: d != nil
             )
         }
@@ -186,7 +201,6 @@ enum GitHubActionsService {
     private struct BranchHead {
         let name: String
         let lastCommitAt: Date
-        let pullRequest: BranchPullRequest?
     }
 
     private static func loadBranchHeads(
@@ -225,21 +239,7 @@ enum GitHubActionsService {
                 guard let node,
                       let committed = parseDateIfPresent(node.target?.committedDate)
                 else { continue }
-                let pr = node.associatedPullRequests?.nodes?.compactMap { $0 }.first
-                heads.append(
-                    BranchHead(
-                        name: node.name,
-                        lastCommitAt: committed,
-                        pullRequest: pr.map {
-                            BranchPullRequest(
-                                number: $0.number,
-                                title: $0.title ?? "",
-                                url: $0.url ?? "",
-                                isDraft: $0.isDraft ?? false
-                            )
-                        }
-                    )
-                )
+                heads.append(BranchHead(name: node.name, lastCommitAt: committed))
             }
 
             guard let page = repository.refs?.pageInfo, page.hasNextPage == true, let next = page.endCursor else {
@@ -249,6 +249,54 @@ enum GitHubActionsService {
         }
 
         return (heads, defaultBranch)
+    }
+
+    /// Most recent pull request per head branch, in any state.
+    ///
+    /// Deliberately NOT `Ref.associatedPullRequests`: that association is computed and
+    /// lags badly for freshly opened PRs — verified against a live repo where two PRs
+    /// merged minutes earlier reported `totalCount: 0` on their own branch refs while
+    /// older PRs resolved fine. Querying the repository's pull requests directly and
+    /// mapping by `headRefName` is what GitHub's own Branches page shows.
+    ///
+    /// All states, because a merged or closed PR is still the answer to "what happened to
+    /// this branch?". Ordered by most recently updated, so the first hit per branch is the
+    /// current one and 100 comfortably covers any branch recent enough to be displayed.
+    static func loadPullRequestsByHeadBranch(
+        remote: GitHubRemote
+    ) async throws -> [String: BranchPullRequest] {
+        try Task.checkCancellation()
+
+        let json = try await runGH([
+            "api", "graphql",
+            "-f", "query=\(pullRequestsQuery)",
+            "-f", "owner=\(remote.owner)",
+            "-f", "name=\(remote.name)"
+        ])
+
+        guard let data = json.data(using: .utf8) else {
+            throw GitHubActionsError.invalidJSON("Empty pull request list")
+        }
+
+        let decoded = try JSONDecoder().decode(GHPullRequestsResponse.self, from: data)
+        let nodes = decoded.data?.repository?.pullRequests?.nodes ?? []
+
+        var result: [String: BranchPullRequest] = [:]
+        for node in nodes {
+            guard let node, let head = node.headRefName, !head.isEmpty else { continue }
+            // Newest-updated first, so never overwrite an earlier (more recent) hit.
+            guard result[head] == nil else { continue }
+            result[head] = BranchPullRequest(
+                number: node.number,
+                title: node.title ?? "",
+                url: node.url ?? "",
+                state: PullRequestState.from(
+                    rawState: node.state ?? "OPEN",
+                    isDraft: node.isDraft ?? false
+                )
+            )
+        }
+        return result
     }
 
     struct BranchDivergence {
@@ -321,8 +369,17 @@ enum GitHubActionsService {
           nodes{
             name
             target{ ... on Commit { committedDate } }
-            associatedPullRequests(first:1,states:OPEN){ nodes{ number title url isDraft } }
           }
+        }
+      }
+    }
+    """
+
+    private static let pullRequestsQuery = """
+    query($owner:String!,$name:String!){
+      repository(owner:$owner,name:$name){
+        pullRequests(states:[OPEN,CLOSED,MERGED],first:100,orderBy:{field:UPDATED_AT,direction:DESC}){
+          nodes{ number title url isDraft state headRefName }
         }
       }
     }
@@ -582,11 +639,22 @@ private struct GHBranchHeadsResponse: Decodable {
     struct RefNode: Decodable {
         let name: String
         let target: Target?
-        let associatedPullRequests: PRConnection?
     }
 
     struct Target: Decodable {
         let committedDate: String?
+    }
+}
+
+private struct GHPullRequestsResponse: Decodable {
+    let data: DataBlock?
+
+    struct DataBlock: Decodable {
+        let repository: Repository?
+    }
+
+    struct Repository: Decodable {
+        let pullRequests: PRConnection?
     }
 
     struct PRConnection: Decodable {
@@ -598,6 +666,8 @@ private struct GHBranchHeadsResponse: Decodable {
         let title: String?
         let url: String?
         let isDraft: Bool?
+        let state: String?
+        let headRefName: String?
     }
 }
 

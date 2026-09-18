@@ -396,7 +396,8 @@ struct DivergenceBadge: View {
     }
 }
 
-/// Open pull request for the branch. Draft reads as an outline, ready-to-merge as solid.
+/// The branch's pull request, coloured by state the way GitHub does it:
+/// green open, grey draft, purple merged, red closed. Click opens it in the browser.
 struct PullRequestPill: View {
     @Environment(AppState.self) private var appState
     let pullRequest: BranchPullRequest
@@ -408,36 +409,55 @@ struct PullRequestPill: View {
             appState.openPullRequest(pullRequest)
         } label: {
             HStack(spacing: 2) {
-                Image(systemName: pullRequest.isDraft ? "arrow.triangle.pull" : "arrow.triangle.merge")
-                    .font(.system(size: 8, weight: .semibold))
+                Image(systemName: pullRequest.state.symbolName)
+                    .font(.system(size: 9, weight: .semibold))
                 Text("#\(pullRequest.number)")
                     .font(.system(size: 10, weight: .semibold, design: .monospaced))
             }
-            .foregroundStyle(foreground)
+            .foregroundStyle(pullRequest.state.tint)
             .padding(.horizontal, 5)
             .padding(.vertical, 1)
             .background(
                 RoundedRectangle(cornerRadius: 4)
-                    .fill(background)
+                    .fill(pullRequest.state.tint.opacity(isHovered ? 0.22 : 0.12))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 4)
-                    .strokeBorder(foreground.opacity(isHovered ? 0.55 : 0.28), lineWidth: 1)
+                    .strokeBorder(pullRequest.state.tint.opacity(isHovered ? 0.6 : 0.3), lineWidth: 1)
             )
             .contentShape(Rectangle())
         }
         .buttonStyle(PressableButtonStyle())
         .onHover { isHovered = $0 }
-        .help("\(pullRequest.isDraft ? "Draft PR" : "Open PR") #\(pullRequest.number) — \(pullRequest.title)")
+        .help("\(pullRequest.state.label) #\(pullRequest.number) — \(pullRequest.title)\nClick to open on GitHub")
+    }
+}
+
+extension PullRequestState {
+    var symbolName: String {
+        switch self {
+        case .open, .draft: return "arrow.triangle.pull"
+        case .merged: return "arrow.triangle.merge"
+        case .closed: return "xmark.circle"
+        }
     }
 
-    private var foreground: Color {
-        pullRequest.isDraft ? Color.secondary : Color.green
+    var tint: Color {
+        switch self {
+        case .open: return .green
+        case .draft: return .secondary
+        case .merged: return .purple
+        case .closed: return .red
+        }
     }
 
-    private var background: Color {
-        let base = pullRequest.isDraft ? Color.primary : Color.green
-        return base.opacity(isHovered ? 0.18 : 0.10)
+    var label: String {
+        switch self {
+        case .open: return "Open PR"
+        case .draft: return "Draft PR"
+        case .merged: return "Merged PR"
+        case .closed: return "Closed PR"
+        }
     }
 }
 
