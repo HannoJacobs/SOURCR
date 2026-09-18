@@ -50,6 +50,16 @@ How it works, so you do not undo it:
 
 Confirm with `gh api user --jq .login` → `HannoJacobs` before any release step.
 
+To undo the whole mechanism and return every directory to plain Homebrew `gh` on the
+global account, delete the shim — nothing else depends on it:
+
+```bash
+rm ~/.local/bin/gh
+```
+
+Editing an `.envrc` revokes its direnv approval and the directory silently reverts to
+the global account until `direnv allow <dir>` is run again.
+
 **Never run `gh auth switch` to fix an identity problem here.** It mutates the global
 account for every other repo on this machine, including Hanno's Healthbridge work. If
 gh reports the wrong account, the shim or the `.envrc` is broken — say so rather than
