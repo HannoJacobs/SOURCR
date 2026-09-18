@@ -62,8 +62,10 @@ struct MenuBarView: View {
     /// One compact header: Diff/Actions on the left, mode tools on the right.
     /// The space between them is the window's title bar — drag it to move or detach.
     private var headerBar: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 5) {
             PanelModeToggle()
+                .fixedSize()
+                .layoutPriority(1)
             dragStrip
             if !appState.isPanelDetached {
                 pinToggleButton
@@ -100,7 +102,7 @@ struct MenuBarView: View {
                 }
             }
         }
-        .padding(.horizontal, 8)
+        .padding(.horizontal, 6)
         .padding(.vertical, 6)
     }
 
@@ -119,7 +121,8 @@ struct MenuBarView: View {
                 .foregroundStyle(.tertiary)
                 .allowsHitTesting(false)
         }
-        .frame(maxWidth: .infinity, minHeight: 26)
+        .frame(minWidth: 0, maxWidth: .infinity, minHeight: 26)
+        .layoutPriority(-1)
         .help(appState.isPanelDetached
               ? "Drag to move · double-click to snap back to the menu bar"
               : "Drag to move · drag away from the menu bar to detach")
@@ -289,7 +292,9 @@ struct PanelModeToggle: View {
                 } label: {
                     Text(mode.title)
                         .font(.system(size: 11, weight: .semibold))
-                        .padding(.horizontal, 12)
+                        .lineLimit(1)
+                        .fixedSize()
+                        .padding(.horizontal, 9)
                         .padding(.vertical, 5)
                         .background(appState.panelMode == mode ? Color.accentColor.opacity(0.25) : Color.clear)
                         .clipShape(RoundedRectangle(cornerRadius: 5))
@@ -315,6 +320,8 @@ struct DiffModePicker: View {
                 } label: {
                     Text(mode.title)
                         .font(.system(size: 10, weight: .medium))
+                        .lineLimit(1)
+                        .fixedSize()
                         .padding(.horizontal, 8)
                         .padding(.vertical, 3)
                         .frame(maxHeight: .infinity)
@@ -353,6 +360,8 @@ struct WrapToggle: View {
         Button(action: action) {
             Text(title)
                 .font(.system(size: 10, weight: .medium))
+                .lineLimit(1)
+                .fixedSize()
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
                 .background(isOn ? Color.accentColor.opacity(0.25) : Color.clear)
@@ -375,6 +384,8 @@ struct BranchWindowPicker: View {
                 } label: {
                     Text(window.title)
                         .font(.system(size: 10, weight: .medium))
+                        .lineLimit(1)
+                        .fixedSize()
                         .padding(.horizontal, 8)
                         .padding(.vertical, 3)
                         .background(appState.branchActivityWindow == window ? Color.accentColor.opacity(0.25) : Color.clear)
