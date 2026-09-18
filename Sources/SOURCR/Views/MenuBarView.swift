@@ -5,6 +5,8 @@ struct MenuBarView: View {
     @Environment(AppState.self) private var appState
     @State private var showingSettings = false
     var onClose: (() -> Void)?
+    /// Supplied by StatusPanelController; moves the window and tears it off the menu bar.
+    var dragActions = PanelDragActions()
 
     var body: some View {
         mainPanel
@@ -58,11 +60,15 @@ struct MenuBarView: View {
     }
 
     /// One compact header: Diff/Actions on the left, mode tools on the right.
+    /// The space between them is the window's title bar — drag it to move or detach.
     private var headerBar: some View {
         HStack(spacing: 8) {
             PanelModeToggle()
-            Spacer(minLength: 6)
-            pinToggleButton
+            dragStrip
+            if !appState.isPanelDetached {
+                pinToggleButton
+            }
+            detachToggleButton
             switch appState.panelMode {
             case .diff:
                 HeaderIconButton(
@@ -84,7 +90,7 @@ struct MenuBarView: View {
                     help: "Refresh Actions",
                     spinning: appState.isRefreshingActions
                 ) {
-                    appState.refreshActions()
+                    appState.refreshActions(forceBranches: true)
                 }
                 HeaderIconButton(systemName: "folder.badge.plus", help: "Add Actions Repository") {
                     appState.presentOpenPanel(for: .actions)
@@ -96,6 +102,39 @@ struct MenuBarView: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
+    }
+
+    /// Empty header space doubling as a title bar: drag to move, drag off to detach,
+    /// double-click to toggle between floating and menu-bar anchored.
+    private var dragStrip: some View {
+        ZStack {
+            PanelDragHandle(
+                onBegan: dragActions.began,
+                onChanged: dragActions.changed,
+                onEnded: dragActions.ended,
+                onDoubleClick: { appState.togglePanelDetached() }
+            )
+            Image(systemName: "line.3.horizontal")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.tertiary)
+                .allowsHitTesting(false)
+        }
+        .frame(maxWidth: .infinity, minHeight: 26)
+        .help(appState.isPanelDetached
+              ? "Drag to move · double-click to snap back to the menu bar"
+              : "Drag to move · drag away from the menu bar to detach")
+    }
+
+    private var detachToggleButton: some View {
+        HeaderIconButton(
+            systemName: appState.isPanelDetached ? "menubar.arrow.up.rectangle" : "macwindow",
+            help: appState.isPanelDetached
+                ? "Reattach to the menu bar"
+                : "Detach into a floating window (or drag the header)",
+            isActive: appState.isPanelDetached
+        ) {
+            appState.togglePanelDetached()
+        }
     }
 
     private var pinToggleButton: some View {
@@ -321,5 +360,32 @@ struct WrapToggle: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// How recently a branch must have been touched to earn a place on the board.
+struct BranchWindowPicker: View {
+    @Environment(AppState.self) private var appState
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(BranchActivityWindow.allCases) { window in
+                Button {
+                    appState.branchActivityWindow = window
+                } label: {
+                    Text(window.title)
+                        .font(.system(size: 10, weight: .medium))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(appState.branchActivityWindow == window ? Color.accentColor.opacity(0.25) : Color.clear)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(2)
+        .background(Color.primary.opacity(0.06))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 }

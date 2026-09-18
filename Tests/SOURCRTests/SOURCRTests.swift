@@ -235,3 +235,187 @@ struct ActionTimingTests {
         #expect(GitHubActionsService.parseDateIfPresent("2026-07-29T13:10:35Z") != nil)
     }
 }
+
+// MARK: - Branch board
+
+struct BranchBoardTests {
+    private let repoID = UUID()
+    private let now = Date(timeIntervalSince1970: 1_800_000_000)
+
+    private func run(
+        _ workflow: String,
+        branch: String,
+        status: String,
+        conclusion: String?,
+        ageSeconds: TimeInterval,
+        durationSeconds: TimeInterval = 90,
+        databaseId: Int = Int.random(in: 1...1_000_000)
+    ) -> ActionRun {
+        let started = now.addingTimeInterval(-ageSeconds)
+        return ActionRun(
+            databaseId: databaseId,
+            repoID: repoID,
+            workflowName: workflow,
+            displayTitle: workflow,
+            headBranch: branch,
+            event: "push",
+            status: status,
+            conclusion: conclusion,
+            createdAt: started,
+            startedAt: started,
+            updatedAt: started.addingTimeInterval(durationSeconds),
+            url: "",
+            attempt: 1
+        )
+    }
+
+    private func branch(
+        _ name: String,
+        ageSeconds: TimeInterval,
+        ahead: Int = 0,
+        behind: Int = 0,
+        isDefault: Bool = false,
+        pr: BranchPullRequest? = nil
+    ) -> BranchInfo {
+        BranchInfo(
+            name: name,
+            lastCommitAt: now.addingTimeInterval(-ageSeconds),
+            ahead: ahead,
+            behind: behind,
+            isDefault: isDefault,
+            pullRequest: pr,
+            hasDivergence: true
+        )
+    }
+
+    private func snapshot(branches: [BranchInfo], runs: [ActionRun]) -> RepoActionsSnapshot {
+        RepoActionsSnapshot(
+            remote: GitHubRemote(owner: "o", name: "r"),
+            runs: runs,
+            branches: branches,
+            defaultBranch: "develop",
+            errorMessage: nil,
+            fetchedAt: now,
+            branchesFetchedAt: now
+        )
+    }
+
+    @Test func hidesBranchesWithNoActivityInsideTheWindow() {
+        let snap = snapshot(
+            branches: [
+                branch("develop", ageSeconds: 3_600, isDefault: true),
+                branch("stale/old-thing", ageSeconds: 5 * 86_400)
+            ],
+            runs: []
+        )
+
+        let day = snap.branchActivities(repoID: repoID, window: .day, now: now)
+        #expect(day.map(\.branch.name) == ["develop"])
+
+        let all = snap.branchActivities(repoID: repoID, window: .all, now: now)
+        #expect(Set(all.map(\.branch.name)) == ["develop", "stale/old-thing"])
+    }
+
+    @Test func aRunKeepsAnOtherwiseStaleBranchOnTheBoard() {
+        // Last commit is 3 days old, but CI fired 10 minutes ago — still working on it.
+        let snap = snapshot(
+            branches: [branch("feat/x", ageSeconds: 3 * 86_400)],
+            runs: [run("CI", branch: "feat/x", status: "in_progress", conclusion: nil, ageSeconds: 600)]
+        )
+        let rows = snap.branchActivities(repoID: repoID, window: .day, now: now)
+        #expect(rows.map(\.branch.name) == ["feat/x"])
+    }
+
+    @Test func passedRunsCollapseToASingleTickAndAreHiddenFromTheRowList() {
+        let snap = snapshot(
+            branches: [branch("develop", ageSeconds: 600, isDefault: true)],
+            runs: [
+                run("CI", branch: "develop", status: "completed", conclusion: "success", ageSeconds: 600),
+                run("Deploy", branch: "develop", status: "completed", conclusion: "success", ageSeconds: 500)
+            ]
+        )
+        let row = snap.branchActivities(repoID: repoID, window: .day, now: now)[0]
+        #expect(row.state == .clean)
+        #expect(row.attentionRuns.isEmpty, "a fully green branch shows no run rows, only a tick")
+        #expect(row.runs.count == 2, "the passed runs stay available behind the disclosure")
+    }
+
+    @Test func failedAndRunningWorkflowsKeepTheirOwnRowAndDuration() {
+        let snap = snapshot(
+            branches: [branch("feat/x", ageSeconds: 600)],
+            runs: [
+                run("CI", branch: "feat/x", status: "completed", conclusion: "success", ageSeconds: 900),
+                run("Deploy", branch: "feat/x", status: "completed", conclusion: "failure", ageSeconds: 800, durationSeconds: 243),
+                run("Lint", branch: "feat/x", status: "in_progress", conclusion: nil, ageSeconds: 112)
+            ]
+        )
+        let row = snap.branchActivities(repoID: repoID, window: .day, now: now)[0]
+
+        #expect(row.state == .running, "anything still running wins the branch summary")
+        #expect(row.attentionRuns.map(\.workflowName) == ["Lint", "Deploy"], "running first, then failed; passed dropped")
+
+        let running = row.attentionRuns[0]
+        #expect(Int(running.elapsed(at: now).rounded()) == 112, "running rows count up to now")
+
+        let failed = row.attentionRuns[1]
+        #expect(Int(failed.elapsed(at: now).rounded()) == 243, "failed rows show how long they ran before dying")
+    }
+
+    @Test func runsAreScopedPerBranchNotJustPerWorkflowName() {
+        // Same workflow name on two branches must not collapse into one row.
+        let snap = snapshot(
+            branches: [
+                branch("develop", ageSeconds: 300, isDefault: true),
+                branch("feat/x", ageSeconds: 300)
+            ],
+            runs: [
+                run("CI", branch: "develop", status: "completed", conclusion: "success", ageSeconds: 300, databaseId: 1),
+                run("CI", branch: "feat/x", status: "completed", conclusion: "failure", ageSeconds: 200, databaseId: 2)
+            ]
+        )
+        let rows = snap.branchActivities(repoID: repoID, window: .day, now: now)
+        let byName = Dictionary(uniqueKeysWithValues: rows.map { ($0.branch.name, $0) })
+
+        #expect(byName["develop"]?.state == .clean)
+        #expect(byName["feat/x"]?.state == .failed)
+    }
+
+    @Test func boardSortsRunningThenFailedThenMostRecent() {
+        let snap = snapshot(
+            branches: [
+                branch("clean-old", ageSeconds: 7_200),
+                branch("clean-new", ageSeconds: 60),
+                branch("broken", ageSeconds: 3_600),
+                branch("busy", ageSeconds: 3_600)
+            ],
+            runs: [
+                run("CI", branch: "clean-old", status: "completed", conclusion: "success", ageSeconds: 7_200),
+                run("CI", branch: "clean-new", status: "completed", conclusion: "success", ageSeconds: 60),
+                run("CI", branch: "broken", status: "completed", conclusion: "failure", ageSeconds: 3_600),
+                run("CI", branch: "busy", status: "in_progress", conclusion: nil, ageSeconds: 30)
+            ]
+        )
+        let names = snap.branchActivities(repoID: repoID, window: .day, now: now).map(\.branch.name)
+        #expect(names == ["busy", "broken", "clean-new", "clean-old"])
+    }
+
+    @Test func fallsBackToRunDerivedBranchesWhenBranchMetadataIsUnavailable() {
+        // The GraphQL branch call can fail (SAML, scopes, network) while runs succeed.
+        // The board must still render rather than going blank.
+        let snap = snapshot(
+            branches: [],
+            runs: [run("CI", branch: "feat/x", status: "in_progress", conclusion: nil, ageSeconds: 120)]
+        )
+        let rows = snap.branchActivities(repoID: repoID, window: .day, now: now)
+        #expect(rows.map(\.branch.name) == ["feat/x"])
+        #expect(!rows[0].branch.hasDivergence, "divergence is unknown here, not zero")
+        #expect(rows[0].state == .running)
+    }
+
+    @Test func branchWithNoRunsReadsAsIdleNotGreen() {
+        let snap = snapshot(branches: [branch("docs/typo", ageSeconds: 300)], runs: [])
+        let row = snap.branchActivities(repoID: repoID, window: .day, now: now)[0]
+        #expect(row.state == .idle, "no workflows ran — that is not a pass")
+        #expect(row.attentionRuns.isEmpty)
+    }
+}

@@ -133,6 +133,201 @@ enum GitHubActionsService {
         return ActionRunDetail(run: updated, jobs: jobs)
     }
 
+    // MARK: - Branches
+
+    /// Branch heads are paged in full (repos here run to 129 branches, and GitHub's
+    /// `TAG_COMMIT_DATE` ref ordering does not actually order branch heads by commit
+    /// date — verified against a live repo — so nothing may be trusted to come first).
+    private static let branchPageSize = 100
+    private static let maxBranchPages = 5
+
+    /// Divergence is resolved only for the most recently committed branches: the ones
+    /// any activity window can realistically surface. Comparing all 129 branches cost
+    /// ~4.4s per page against ~1.9s without, for numbers nothing would ever draw.
+    private static let divergenceBranchLimit = 30
+
+    /// Every branch head with its last commit, open PR, and (for the recent ones)
+    /// divergence from the default branch.
+    static func loadBranches(
+        remote: GitHubRemote,
+        defaultBranchHint: String?
+    ) async throws -> (branches: [BranchInfo], defaultBranch: String) {
+        try Task.checkCancellation()
+
+        let heads = try await loadBranchHeads(remote: remote)
+        // Self-heals if the default branch changed since the cached hint.
+        let base = heads.defaultBranch ?? defaultBranchHint ?? "main"
+
+        let recent = heads.heads
+            .sorted { $0.lastCommitAt > $1.lastCommitAt }
+            .prefix(divergenceBranchLimit)
+            .map(\.name)
+
+        let divergence = recent.isEmpty
+            ? [:]
+            : try await loadDivergence(remote: remote, branches: Array(recent))
+
+        let branches = heads.heads.map { head -> BranchInfo in
+            let d = divergence[head.name]
+            return BranchInfo(
+                name: head.name,
+                lastCommitAt: head.lastCommitAt,
+                ahead: d?.ahead ?? 0,
+                behind: d?.behind ?? 0,
+                isDefault: head.name == base,
+                pullRequest: head.pullRequest,
+                hasDivergence: d != nil
+            )
+        }
+
+        return (branches, base)
+    }
+
+    private struct BranchHead {
+        let name: String
+        let lastCommitAt: Date
+        let pullRequest: BranchPullRequest?
+    }
+
+    private static func loadBranchHeads(
+        remote: GitHubRemote
+    ) async throws -> (heads: [BranchHead], defaultBranch: String?) {
+        var heads: [BranchHead] = []
+        var defaultBranch: String?
+        var cursor: String?
+
+        for _ in 0..<maxBranchPages {
+            try Task.checkCancellation()
+
+            var arguments = [
+                "api", "graphql",
+                "-f", "query=\(branchHeadsQuery)",
+                "-f", "owner=\(remote.owner)",
+                "-f", "name=\(remote.name)"
+            ]
+            if let cursor {
+                arguments.append(contentsOf: ["-f", "after=\(cursor)"])
+            }
+
+            let json = try await runGH(arguments)
+            guard let data = json.data(using: .utf8) else {
+                throw GitHubActionsError.invalidJSON("Empty branch list")
+            }
+
+            let decoded = try JSONDecoder().decode(GHBranchHeadsResponse.self, from: data)
+            guard let repository = decoded.data?.repository else {
+                throw GitHubActionsError.invalidJSON("No repository in branch response")
+            }
+
+            defaultBranch = defaultBranch ?? repository.defaultBranchRef?.name
+
+            for node in repository.refs?.nodes ?? [] {
+                guard let node,
+                      let committed = parseDateIfPresent(node.target?.committedDate)
+                else { continue }
+                let pr = node.associatedPullRequests?.nodes?.compactMap { $0 }.first
+                heads.append(
+                    BranchHead(
+                        name: node.name,
+                        lastCommitAt: committed,
+                        pullRequest: pr.map {
+                            BranchPullRequest(
+                                number: $0.number,
+                                title: $0.title ?? "",
+                                url: $0.url ?? "",
+                                isDraft: $0.isDraft ?? false
+                            )
+                        }
+                    )
+                )
+            }
+
+            guard let page = repository.refs?.pageInfo, page.hasNextPage == true, let next = page.endCursor else {
+                break
+            }
+            cursor = next
+        }
+
+        return (heads, defaultBranch)
+    }
+
+    struct BranchDivergence {
+        let ahead: Int
+        let behind: Int
+    }
+
+    /// One aliased query from the default branch outward, so `aheadBy`/`behindBy` read
+    /// exactly the way GitHub's Branches page labels them (ahead of / behind the default).
+    /// Aliases are generated (`b0`, `b1`, …) because branch names are not valid GraphQL names.
+    private static func loadDivergence(
+        remote: GitHubRemote,
+        branches: [String]
+    ) async throws -> [String: BranchDivergence] {
+        try Task.checkCancellation()
+
+        let fields = branches.enumerated()
+            .map { index, name in
+                "    b\(index): compare(headRef:\"\(escapeGraphQLString(name))\"){ aheadBy behindBy }"
+            }
+            .joined(separator: "\n")
+
+        let query = """
+        query($owner:String!,$name:String!){
+          repository(owner:$owner,name:$name){
+            defaultBranchRef{
+        \(fields)
+            }
+          }
+        }
+        """
+
+        let json = try await runGH([
+            "api", "graphql",
+            "-f", "query=\(query)",
+            "-f", "owner=\(remote.owner)",
+            "-f", "name=\(remote.name)"
+        ])
+
+        guard let data = json.data(using: .utf8) else {
+            throw GitHubActionsError.invalidJSON("Empty divergence response")
+        }
+
+        let decoded = try JSONDecoder().decode(GHDivergenceResponse.self, from: data)
+        let comparisons = decoded.data?.repository?.defaultBranchRef ?? [:]
+
+        var result: [String: BranchDivergence] = [:]
+        for (index, name) in branches.enumerated() {
+            guard let comparison = comparisons["b\(index)"] ?? nil,
+                  let ahead = comparison.aheadBy,
+                  let behind = comparison.behindBy
+            else { continue }
+            result[name] = BranchDivergence(ahead: max(0, ahead), behind: max(0, behind))
+        }
+        return result
+    }
+
+    static func escapeGraphQLString(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+    }
+
+    private static let branchHeadsQuery = """
+    query($owner:String!,$name:String!,$after:String){
+      repository(owner:$owner,name:$name){
+        defaultBranchRef{ name }
+        refs(refPrefix:"refs/heads/",first:100,after:$after){
+          pageInfo{ hasNextPage endCursor }
+          nodes{
+            name
+            target{ ... on Commit { committedDate } }
+            associatedPullRequests(first:1,states:OPEN){ nodes{ number title url isDraft } }
+          }
+        }
+      }
+    }
+    """
+
     // MARK: - Formatting
 
     static func formatDuration(_ interval: TimeInterval) -> String {
@@ -353,5 +548,73 @@ private struct GHStep: Decodable {
 
     private func optionalDate(_ raw: String?) -> Date? {
         GitHubActionsService.parseDateIfPresent(raw)
+    }
+}
+
+// MARK: - gh GraphQL DTOs (branches)
+
+private struct GHBranchHeadsResponse: Decodable {
+    let data: DataBlock?
+
+    struct DataBlock: Decodable {
+        let repository: Repository?
+    }
+
+    struct Repository: Decodable {
+        let defaultBranchRef: RefName?
+        let refs: RefConnection?
+    }
+
+    struct RefName: Decodable {
+        let name: String
+    }
+
+    struct RefConnection: Decodable {
+        let pageInfo: PageInfo?
+        let nodes: [RefNode?]?
+    }
+
+    struct PageInfo: Decodable {
+        let hasNextPage: Bool?
+        let endCursor: String?
+    }
+
+    struct RefNode: Decodable {
+        let name: String
+        let target: Target?
+        let associatedPullRequests: PRConnection?
+    }
+
+    struct Target: Decodable {
+        let committedDate: String?
+    }
+
+    struct PRConnection: Decodable {
+        let nodes: [PRNode?]?
+    }
+
+    struct PRNode: Decodable {
+        let number: Int
+        let title: String?
+        let url: String?
+        let isDraft: Bool?
+    }
+}
+
+private struct GHDivergenceResponse: Decodable {
+    let data: DataBlock?
+
+    struct DataBlock: Decodable {
+        let repository: Repository?
+    }
+
+    struct Repository: Decodable {
+        /// Generated aliases (`b0`, `b1`, …) → comparison, so the keys are dynamic.
+        let defaultBranchRef: [String: Comparison?]?
+    }
+
+    struct Comparison: Decodable {
+        let aheadBy: Int?
+        let behindBy: Int?
     }
 }

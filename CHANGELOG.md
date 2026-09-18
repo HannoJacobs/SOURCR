@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.12
+
+- Actions is now a **branch board**, not a workflow-run list: one row per branch showing how far it has diverged from the default branch (behind ↓ / ahead ↑), its open pull request, and a single collapsed check state — the glance that previously required keeping GitHub's Branches page open in a browser tab.
+- Applied the noise rule throughout: workflows that already passed no longer get a row. A branch where everything is green collapses to one tick. Only runs that are **still going** (with a live ticking timer) or that **failed** (with how long they ran before dying) earn a line of their own; the passing runs stay one disclosure click away, and the repo header shows a running/failed count or a single tick.
+- Branches with no commit and no workflow run inside the activity window are hidden entirely — the board stays about work actually in flight. The window defaults to 1 day and is settable to 1d / 3d / 7d / All under Actions Settings → Board.
+- Branch metadata comes from one paginated GraphQL round trip per repo (heads + last commit + open PR), followed by one aliased `compare` query for the 30 most recently committed branches. Pagination matters: a watched repo here carries 129 branches, and GitHub's `TAG_COMMIT_DATE` ref ordering does **not** actually order branch heads by commit date, so a single unpaginated page could silently drop a branch worked on minutes ago.
+- Divergence is resolved from the default branch outward, so `aheadBy`/`behindBy` read exactly as GitHub's Branches page labels them; branches outside the divergence window report divergence as *unknown* rather than drawing a misleading `0`. If the branch query fails outright (SAML, scopes, network), the board still renders rows derived from workflow runs instead of going blank.
+- Runs are now deduplicated per **(branch, workflow)** rather than per workflow name — CI on `develop` and CI on a feature branch are different rows — and the run list window grew from 20 to 50 so a busy repo cannot starve quieter branches of their status.
+- Branch metadata polls on its own 45s cadence rather than the 10s run poll: divergence and PR state change on a push, not second-to-second, and each repo costs a GraphQL round trip. Manual refresh and opening the panel always force a fresh branch fetch.
+- New third window mode: **drag the panel off the menu bar to detach it.** The empty space in the header is now a title bar — drag it to move the window, drag more than 8pt while anchored to tear it off, or double-click to toggle. A detached panel floats above every other app, never auto-dismisses, and remembers its position across hide/show and across launches.
+- Detach is implemented with an AppKit drag surface behind the SwiftUI header controls (not a `DragGesture`): the panel is a `.nonactivatingPanel`, so dragging must work without the app ever becoming active, and the window tracks the cursor 1:1 in screen coordinates. Detached windows also drop `.transient` from their collection behaviour so they no longer vanish in Mission Control.
+- Both window modes share one geometry rule — fixed right edge, fixed top, detail pane expanding leftward — so detaching, reattaching and expanding never make the content jump sideways. The pin control hides while detached rather than sitting there inert.
+- Packaging / full-send: bump CFBundle version to `1.12`, ship `SOURCR.dmg` on GitHub release `v1.12`, and reinstall `/Applications/SOURCR.app` with launch-log proof for version/build `1.12`.
+
 ## 1.11
 
 - Fixed a multi-monitor jump: with two (or more) displays attached, switching Diff ↔ Actions (or any panel height resize) could move the menu-bar panel onto the other screen.

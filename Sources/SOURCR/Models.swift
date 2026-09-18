@@ -379,37 +379,198 @@ enum ActionTiming {
     }
 }
 
+// MARK: - Branches (GitHub)
+
+/// Open pull request associated with a branch head.
+struct BranchPullRequest: Hashable {
+    let number: Int
+    let title: String
+    let url: String
+    let isDraft: Bool
+}
+
+/// Remote branch metadata: divergence from the default branch, last commit, open PR.
+struct BranchInfo: Hashable {
+    let name: String
+    let lastCommitAt: Date
+    /// Commits this branch has that the default branch does not.
+    let ahead: Int
+    /// Commits the default branch has that this branch does not.
+    let behind: Int
+    let isDefault: Bool
+    let pullRequest: BranchPullRequest?
+    /// False when `ahead`/`behind` could not be resolved — an old branch outside the
+    /// divergence window, or a row derived from workflow runs after the branch query
+    /// failed. Divergence is then *unknown*, not zero, and must not be drawn as a value.
+    let hasDivergence: Bool
+}
+
+/// Collapsed check state for a branch — the only four states worth a glance.
+enum BranchCheckState {
+    case running
+    case failed
+    /// Every workflow that ran most recently on this branch passed.
+    case clean
+    /// Nothing has run on this branch (or only cancelled/skipped runs).
+    case idle
+}
+
+/// How far back a branch counts as "something I'm working on".
+enum BranchActivityWindow: String, CaseIterable, Identifiable {
+    case day
+    case threeDays
+    case week
+    case all
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .day: return "1d"
+        case .threeDays: return "3d"
+        case .week: return "7d"
+        case .all: return "All"
+        }
+    }
+
+    /// `nil` means no cutoff.
+    var interval: TimeInterval? {
+        switch self {
+        case .day: return 86_400
+        case .threeDays: return 3 * 86_400
+        case .week: return 7 * 86_400
+        case .all: return nil
+        }
+    }
+
+    func includes(_ activity: Date, now: Date) -> Bool {
+        guard let interval else { return true }
+        return now.timeIntervalSince(activity) <= interval
+    }
+}
+
+/// One branch plus the newest run per workflow on it — the Actions list row.
+struct BranchActivity: Identifiable, Hashable {
+    let repoID: UUID
+    let branch: BranchInfo
+    /// Newest run per workflow name on this branch.
+    let runs: [ActionRun]
+
+    var id: String { "\(repoID.uuidString):\(branch.name)" }
+
+    var runningRuns: [ActionRun] { runs.filter(\.isRunning) }
+    var failedRuns: [ActionRun] { runs.filter(\.isFailed) }
+    var passedRuns: [ActionRun] { runs.filter(\.isPassed) }
+
+    /// The noise rule: only running and failed runs earn a row of their own.
+    /// Running first (live timers), then failures (newest first).
+    var attentionRuns: [ActionRun] {
+        let running = runningRuns.sorted { $0.createdAt > $1.createdAt }
+        let failed = failedRuns.sorted { $0.createdAt > $1.createdAt }
+        return running + failed
+    }
+
+    var state: BranchCheckState {
+        if !runningRuns.isEmpty { return .running }
+        if !failedRuns.isEmpty { return .failed }
+        if !passedRuns.isEmpty { return .clean }
+        return .idle
+    }
+
+    /// Newest of: last commit on the branch, and any run touching it.
+    /// Drives the "am I actually working on this?" cutoff.
+    var lastActivityAt: Date {
+        var latest = branch.lastCommitAt
+        for run in runs {
+            latest = max(latest, max(run.createdAt, run.updatedAt))
+        }
+        return latest
+    }
+
+    /// Live/failed runs sort above clean branches; then most recently touched.
+    var sortRank: Int {
+        switch state {
+        case .running: return 0
+        case .failed: return 1
+        case .clean: return 2
+        case .idle: return 3
+        }
+    }
+}
+
 struct RepoActionsSnapshot: Hashable {
     var remote: GitHubRemote?
     var runs: [ActionRun]
+    var branches: [BranchInfo]
+    var defaultBranch: String?
     var errorMessage: String?
     var fetchedAt: Date?
+    /// Separate from `fetchedAt`: branch metadata polls on a slower cadence than runs.
+    var branchesFetchedAt: Date?
 
     static let empty = RepoActionsSnapshot(
         remote: nil,
         runs: [],
+        branches: [],
+        defaultBranch: nil,
         errorMessage: nil,
-        fetchedAt: nil
+        fetchedAt: nil,
+        branchesFetchedAt: nil
     )
 
-    /// One entry per workflow name: the newest run only.
-    /// A new in-progress run replaces the previous pass/fail for that workflow.
-    var latestRunsByWorkflow: [ActionRun] {
+    /// One entry per (branch, workflow): the newest run only.
+    /// Deduping by workflow name alone would collide CI on `develop` with CI on a feature branch.
+    var latestRunsByBranchAndWorkflow: [ActionRun] {
         var best: [String: ActionRun] = [:]
         for run in runs {
-            if let existing = best[run.workflowName], !run.isNewerThan(existing) {
-                continue
-            }
-            best[run.workflowName] = run
+            let key = "\(run.headBranch)\u{0000}\(run.workflowName)"
+            if let existing = best[key], !run.isNewerThan(existing) { continue }
+            best[key] = run
         }
-        return best.values.sorted { a, b in
-            if a.isRunning != b.isRunning { return a.isRunning && !b.isRunning }
-            if a.createdAt != b.createdAt { return a.createdAt > b.createdAt }
-            return a.databaseId > b.databaseId
-        }
+        return Array(best.values)
     }
 
-    var runningCount: Int { latestRunsByWorkflow.filter(\.isRunning).count }
-    var failedCount: Int { latestRunsByWorkflow.filter(\.isFailed).count }
-    var passedCount: Int { latestRunsByWorkflow.filter(\.isPassed).count }
+    /// Branch rows for the panel, filtered by the activity window and sorted
+    /// running → failed → clean, then most recently touched.
+    func branchActivities(repoID: UUID, window: BranchActivityWindow, now: Date) -> [BranchActivity] {
+        var runsByBranch: [String: [ActionRun]] = [:]
+        for run in latestRunsByBranchAndWorkflow {
+            runsByBranch[run.headBranch, default: []].append(run)
+        }
+
+        // If the branch query failed (auth, SAML, network), still show what the runs
+        // know about — a board without divergence beats a blank panel.
+        let sourceBranches = branches.isEmpty
+            ? syntheticBranches(from: runsByBranch)
+            : branches
+
+        return sourceBranches
+            .map { branch in
+                BranchActivity(
+                    repoID: repoID,
+                    branch: branch,
+                    runs: (runsByBranch[branch.name] ?? []).sorted { $0.createdAt > $1.createdAt }
+                )
+            }
+            .filter { window.includes($0.lastActivityAt, now: now) }
+            .sorted { a, b in
+                if a.sortRank != b.sortRank { return a.sortRank < b.sortRank }
+                if a.lastActivityAt != b.lastActivityAt { return a.lastActivityAt > b.lastActivityAt }
+                return a.branch.name < b.branch.name
+            }
+    }
+
+    private func syntheticBranches(from runsByBranch: [String: [ActionRun]]) -> [BranchInfo] {
+        runsByBranch.map { name, runs in
+            BranchInfo(
+                name: name,
+                lastCommitAt: runs.map(\.createdAt).max() ?? Date.distantPast,
+                ahead: 0,
+                behind: 0,
+                isDefault: name == defaultBranch,
+                pullRequest: nil,
+                hasDivergence: false
+            )
+        }
+    }
 }

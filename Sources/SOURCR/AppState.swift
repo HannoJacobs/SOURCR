@@ -14,6 +14,8 @@ final class AppState {
     private static let wordWrapKey = "sourcr.wordWrap"
     private static let panelModeKey = "sourcr.panelMode"
     private static let panelPinnedKey = "sourcr.panelPinned"
+    private static let panelDetachedKey = "sourcr.panelDetached"
+    private static let branchWindowKey = "sourcr.branchActivityWindow"
     private static let diffCollapsedKey = "sourcr.diffCollapsedRepos"
     private static let actionsCollapsedKey = "sourcr.actionsCollapsedRepos"
 
@@ -50,6 +52,26 @@ final class AppState {
             }
         }
     }
+    /// Free-floating window mode: dragged off the menu bar, hovers over every app.
+    /// Supersedes pinning while on (detached is always on top and never auto-dismisses).
+    var isPanelDetached = false {
+        didSet {
+            guard isPanelDetached != oldValue else { return }
+            UserDefaults.standard.set(isPanelDetached, forKey: Self.panelDetachedKey)
+            AppDiagnostics.info(.appState, "panel \(isPanelDetached ? "detached" : "reattached")")
+            onPanelDetachChanged?(isPanelDetached)
+        }
+    }
+
+    /// How recently a branch must have been touched to be worth showing.
+    var branchActivityWindow: BranchActivityWindow = .day {
+        didSet {
+            guard branchActivityWindow != oldValue else { return }
+            UserDefaults.standard.set(branchActivityWindow.rawValue, forKey: Self.branchWindowKey)
+            onPanelLayoutChange?()
+        }
+    }
+
     /// When true, the panel stays open while working in other apps (no auto-dismiss).
     var isPanelPinned = false {
         didSet {
@@ -125,6 +147,22 @@ final class AppState {
         setRepoAccordionOpen(repoID, in: mode, open: !isRepoAccordionOpen(repoID, in: mode))
     }
 
+    /// Branch rows the user opened to reveal every run, including the ones that passed.
+    /// Session-only: the quiet default is the point, so it does not persist.
+    var expandedBranchIDs: Set<String> = []
+
+    func isBranchExpanded(_ id: String) -> Bool {
+        expandedBranchIDs.contains(id)
+    }
+
+    func toggleBranchExpanded(_ id: String) {
+        if expandedBranchIDs.contains(id) {
+            expandedBranchIDs.remove(id)
+        } else {
+            expandedBranchIDs.insert(id)
+        }
+    }
+
     /// Repos for the currently visible mode.
     var activeRepos: [WatchedRepo] {
         switch panelMode {
@@ -166,6 +204,8 @@ final class AppState {
     @ObservationIgnored var onPanelLayoutChange: (() -> Void)?
     /// Hook for StatusPanelController when pin toggles (e.g. unpin while inactive → hide).
     @ObservationIgnored var onPanelPinnedChanged: ((Bool) -> Void)?
+    /// Hook for StatusPanelController when the panel detaches from / returns to the menu bar.
+    @ObservationIgnored var onPanelDetachChanged: ((Bool) -> Void)?
 
     private var refreshTimer: Timer?
     private var fsSources: [UUID: DispatchSourceFileSystemObject] = [:]
@@ -266,12 +306,21 @@ final class AppState {
             panelMode = mode
         }
         isPanelPinned = defaults.bool(forKey: Self.panelPinnedKey)
+        isPanelDetached = defaults.bool(forKey: Self.panelDetachedKey)
+        if let raw = defaults.string(forKey: Self.branchWindowKey),
+           let window = BranchActivityWindow(rawValue: raw) {
+            branchActivityWindow = window
+        }
         diffCollapsedRepoIDs = loadCollapsedRepos(key: Self.diffCollapsedKey)
         actionsCollapsedRepoIDs = loadCollapsedRepos(key: Self.actionsCollapsedKey)
         pruneCollapsedRepos()
         if selectedRepoID == nil {
             selectedRepoID = activeRepos.first?.id
         }
+    }
+
+    func togglePanelDetached() {
+        isPanelDetached.toggle()
     }
 
     func togglePanelPinned() {
@@ -466,13 +515,19 @@ final class AppState {
     }
 
     /// Refresh Diff + Actions together (panel open / foreground).
-    func refreshVisibleSurfaces(forceDiff: Bool = true) {
+    func refreshVisibleSurfaces(forceDiff: Bool = true, forceBranches: Bool = false) {
         refreshAll(force: forceDiff)
-        refreshActions()
+        refreshActions(forceBranches: forceBranches)
     }
 
+    /// How often branch metadata (ahead/behind, PRs, last commit) is re-fetched.
+    /// Far slower than the 10s run poll: divergence changes on a push, not per second,
+    /// and each repo costs one GraphQL round trip.
+    private static let branchRefreshInterval: TimeInterval = 45
+
     /// Actions list refresh (manual button, on-show, or auto-poll).
-    func refreshActions() {
+    /// `forceBranches` bypasses the branch-metadata throttle (manual refresh / panel open).
+    func refreshActions(forceBranches: Bool = false) {
         guard !actionsRepos.isEmpty else { return }
         // Coalesce: if a refresh is already in flight, let it finish rather than
         // cancelling mid-`gh` and restarting every poll tick. Timeouts in
@@ -484,7 +539,7 @@ final class AppState {
         actionsRefreshGeneration += 1
         let generation = actionsRefreshGeneration
         actionsRefreshTask = Task { @MainActor in
-            await refreshActionsAllAsync(generation: generation)
+            await refreshActionsAllAsync(generation: generation, forceBranches: forceBranches)
             if generation == self.actionsRefreshGeneration {
                 self.actionsRefreshTask = nil
             }
@@ -722,7 +777,7 @@ final class AppState {
 
     // MARK: - Async Actions
 
-    private func refreshActionsAllAsync(generation: Int) async {
+    private func refreshActionsAllAsync(generation: Int, forceBranches: Bool) async {
         guard generation == actionsRefreshGeneration else { return }
         isRefreshingActions = true
         defer {
@@ -734,7 +789,7 @@ final class AppState {
         await withTaskGroup(of: Void.self) { group in
             for repo in actionsRepos {
                 group.addTask { @MainActor in
-                    await self.refreshActionsRepoAsync(repo, generation: generation)
+                    await self.refreshActionsRepoAsync(repo, generation: generation, forceBranches: forceBranches)
                 }
             }
         }
@@ -746,7 +801,7 @@ final class AppState {
         await loadActionDetailAsync(for: selected)
     }
 
-    private func refreshActionsRepoAsync(_ repo: WatchedRepo, generation: Int) async {
+    private func refreshActionsRepoAsync(_ repo: WatchedRepo, generation: Int, forceBranches: Bool) async {
         let path = repo.path
         let repoID = repo.id
         let previous = actionsSnapshots[repoID] ?? .empty
@@ -759,19 +814,52 @@ final class AppState {
             try Task.checkCancellation()
             guard generation == actionsRefreshGeneration else { return }
 
-            let runs = try await GitHubActionsService.listRuns(remote: remote, repoID: repoID, limit: 20)
+            // 50 (not 20): the branch board splits runs across every active branch,
+            // so a short window would drop workflows for all but the busiest branch.
+            let runs = try await GitHubActionsService.listRuns(remote: remote, repoID: repoID, limit: 50)
+
+            guard !Task.isCancelled, generation == actionsRefreshGeneration else { return }
+
+            var branches = previous.branches
+            var defaultBranch = previous.defaultBranch
+            var branchesFetchedAt = previous.branchesFetchedAt
+
+            if shouldRefreshBranches(previous: previous, force: forceBranches) {
+                do {
+                    let loaded = try await GitHubActionsService.loadBranches(
+                        remote: remote,
+                        defaultBranchHint: previous.defaultBranch
+                    )
+                    guard !Task.isCancelled, generation == actionsRefreshGeneration else { return }
+                    branches = loaded.branches
+                    defaultBranch = loaded.defaultBranch
+                    branchesFetchedAt = Date()
+                } catch is CancellationError {
+                    return
+                } catch {
+                    // Runs already succeeded — keep the previous branch metadata rather
+                    // than blanking the board because one GraphQL call failed.
+                    AppDiagnostics.error(
+                        .appState,
+                        "branch refresh failed repo=\(repo.path) error=\(error.localizedDescription)"
+                    )
+                }
+            }
 
             guard !Task.isCancelled, generation == actionsRefreshGeneration else { return }
 
             actionsSnapshots[repoID] = RepoActionsSnapshot(
                 remote: remote,
                 runs: runs,
+                branches: branches,
+                defaultBranch: defaultBranch,
                 errorMessage: nil,
-                fetchedAt: Date()
+                fetchedAt: Date(),
+                branchesFetchedAt: branchesFetchedAt
             )
             AppDiagnostics.debug(
                 .appState,
-                "actions repo=\(repo.displayName) remote=\(remote.slug) runs=\(runs.count) running=\(runs.filter(\.isRunning).count)"
+                "actions repo=\(repo.displayName) remote=\(remote.slug) runs=\(runs.count) running=\(runs.filter(\.isRunning).count) branches=\(branches.count)"
             )
         } catch is CancellationError {
             return
@@ -780,11 +868,41 @@ final class AppState {
             actionsSnapshots[repoID] = RepoActionsSnapshot(
                 remote: previous.remote,
                 runs: previous.runs,
+                branches: previous.branches,
+                defaultBranch: previous.defaultBranch,
                 errorMessage: error.localizedDescription,
-                fetchedAt: Date()
+                fetchedAt: Date(),
+                branchesFetchedAt: previous.branchesFetchedAt
             )
             AppDiagnostics.error(.appState, "actions refresh failed repo=\(repo.path) error=\(error.localizedDescription)")
         }
+    }
+
+    private func shouldRefreshBranches(previous: RepoActionsSnapshot, force: Bool) -> Bool {
+        if force { return true }
+        guard let last = previous.branchesFetchedAt else { return true }
+        return Date().timeIntervalSince(last) >= Self.branchRefreshInterval
+    }
+
+    // MARK: - Branch board
+
+    /// Branch rows for a repo, already filtered by the activity window and sorted.
+    func branchActivities(for repo: WatchedRepo, now: Date = Date()) -> [BranchActivity] {
+        let snap = actionsSnapshots[repo.id] ?? .empty
+        return snap.branchActivities(repoID: repo.id, window: branchActivityWindow, now: now)
+    }
+
+    func openPullRequest(_ pr: BranchPullRequest) {
+        guard let url = URL(string: pr.url), !pr.url.isEmpty else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    func openBranchOnGitHub(_ branch: BranchInfo, in repoID: UUID) {
+        guard let slug = actionsSnapshots[repoID]?.remote?.slug else { return }
+        let encoded = branch.name
+            .addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? branch.name
+        guard let url = URL(string: "https://github.com/\(slug)/tree/\(encoded)") else { return }
+        NSWorkspace.shared.open(url)
     }
 
     private func loadActionDetailAsync(for run: ActionRun) async {

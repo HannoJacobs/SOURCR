@@ -67,6 +67,18 @@ struct SettingsPanel: View {
                              : "These repos appear only in Actions. Diff has its own list.")
                     }
 
+                    if mode == .actions {
+                        Section {
+                            LabeledContent("Show branches") {
+                                BranchWindowPicker()
+                            }
+                        } header: {
+                            Text("Board")
+                        } footer: {
+                            Text("Branches with no commits or runs inside this window are hidden — the board stays about what you are actually working on.")
+                        }
+                    }
+
                     if mode == .diff {
                         Section("Viewer") {
                             LabeledContent("Diff layout") {
