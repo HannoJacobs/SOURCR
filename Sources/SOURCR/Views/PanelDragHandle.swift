@@ -52,6 +52,16 @@ final class PanelDragHandleView: NSView {
     /// Cursor position at mouse-down, in screen space. `nil` when not dragging.
     private var dragAnchor: NSPoint?
 
+    /// An `NSViewRepresentable` with no intrinsic size is greedy in BOTH axes. Without
+    /// this the header row absorbed every spare point of height when the detail pane
+    /// made the window taller, stranding the list in the middle of a blank band.
+    /// Flexible across, fixed down.
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: PanelDragHandleView.handleHeight)
+    }
+
+    static let handleHeight: CGFloat = 26
+
     /// The panel never takes key focus, so the first click must still count.
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 

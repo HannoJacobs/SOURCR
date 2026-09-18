@@ -104,6 +104,9 @@ struct MenuBarView: View {
         }
         .padding(.horizontal, 6)
         .padding(.vertical, 6)
+        // Pin the header to its ideal height so a taller window feeds the list,
+        // never the chrome.
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     /// Empty header space doubling as a title bar: drag to move, drag off to detach,
@@ -121,7 +124,8 @@ struct MenuBarView: View {
                 .foregroundStyle(.tertiary)
                 .allowsHitTesting(false)
         }
-        .frame(minWidth: 0, maxWidth: .infinity, minHeight: 26)
+        .frame(minWidth: 0, maxWidth: .infinity)
+        .frame(height: PanelDragHandleView.handleHeight)
         .layoutPriority(-1)
         .help(appState.isPanelDetached
               ? "Drag to move · double-click to snap back to the menu bar"

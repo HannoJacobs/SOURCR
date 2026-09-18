@@ -314,6 +314,11 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
         if let visible {
             // Never taller than the visible display under the menu bar.
             height = min(height, max(SOURCRLayout.minPanelHeight, visible.height - 16))
+            // Growth is downward from a fixed top edge. When the panel cannot fit the
+            // height it wants below that edge, cap the height rather than sliding the
+            // whole window up — the top stays put and the list scrolls instead.
+            let availableBelowTop = topY - (visible.minY + 8)
+            height = min(height, max(SOURCRLayout.minPanelHeight, availableBelowTop))
         }
 
         var origin = NSPoint(x: maxX - width, y: topY - height)
