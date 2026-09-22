@@ -95,6 +95,16 @@ struct SettingsPanel: View {
                         LabeledContent("Build", value: AppDiagnostics.buildVersion)
                         LabeledContent("Bundle", value: Bundle.main.bundleIdentifier ?? "—")
                     }
+
+                    Section {
+                        Button(role: .destructive) {
+                            DispatchQueue.main.async {
+                                NSApplication.shared.terminate(nil)
+                            }
+                        } label: {
+                            Label("Quit SOURCR", systemImage: "power")
+                        }
+                    }
                 }
                 .formStyle(.grouped)
                 .padding(.top, 4)
@@ -108,7 +118,7 @@ struct SettingsPanel: View {
             .onPreferenceChange(SCMBodyHeightKey.self) { height in
                 measuredBodyHeight = height
                 // Settings has its own back-row chrome (~44pt), not the Diff/Actions
-                // header+footer. Report an adjusted body so panelHeight ≈ back + form.
+                // header. Report an adjusted body so panelHeight ≈ back + form.
                 appState.reportSCMBodyHeight(height + 44 - SOURCRLayout.chromeHeight)
             }
         }

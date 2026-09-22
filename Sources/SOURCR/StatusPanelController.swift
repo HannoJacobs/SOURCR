@@ -55,6 +55,23 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
         appState.onPanelDetachChanged = { [weak self] detached in
             self?.handleDetachChanged(detached)
         }
+        // Displays plugged in / unplugged / rearranged: re-place the panel so it can
+        // never be left on a monitor that no longer exists.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(screenParametersChanged(_:)),
+            name: NSApplication.didChangeScreenParametersNotification,
+            object: nil
+        )
+    }
+
+    @objc private func screenParametersChanged(_ notification: Notification) {
+        AppDiagnostics.info(.lifecycle, "screen parameters changed; screens=\(NSScreen.screens.count)")
+        guard isVisible else { return }
+        if !appState.isPanelDetached {
+            captureAnchorFromStatusItem()
+        }
+        applyFrame()
     }
 
     func install() {
@@ -304,12 +321,37 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
         let width = appState.isExpanded ? SOURCRLayout.expandedWidth : SOURCRLayout.scmWidth
         var height = appState.panelHeight
 
-        let detached = appState.isPanelDetached
-        let maxX = (detached ? detachedMaxX : anchoredMaxX) ?? 800
-        let topY = (detached ? detachedTopY : anchoredTopY) ?? 800
-        let visible: NSRect? = detached
-            ? screenVisibleFrame(containing: NSPoint(x: maxX - 1, y: topY - 1))
-            : anchoredVisibleFrame
+        var maxX: CGFloat
+        var topY: CGFloat
+        let visible: NSRect?
+        if appState.isPanelDetached {
+            maxX = detachedMaxX ?? 800
+            topY = detachedTopY ?? 800
+            if let placed = DetachedPlacement.resolve(
+                maxX: maxX,
+                topY: topY,
+                visibleFrames: NSScreen.screens.map(\.visibleFrame)
+            ) {
+                if placed.maxX != maxX || placed.topY != topY {
+                    AppDiagnostics.info(
+                        .lifecycle,
+                        "detached panel position (\(Int(maxX)), \(Int(topY))) not fully on a connected display; placed at (\(Int(placed.maxX)), \(Int(placed.topY)))"
+                    )
+                    maxX = placed.maxX
+                    topY = placed.topY
+                    detachedMaxX = maxX
+                    detachedTopY = topY
+                    saveDetachedPosition()
+                }
+                visible = placed.visibleFrame
+            } else {
+                visible = nil
+            }
+        } else {
+            maxX = anchoredMaxX ?? 800
+            topY = anchoredTopY ?? 800
+            visible = anchoredVisibleFrame
+        }
 
         if let visible {
             // Never taller than the visible display under the menu bar.
@@ -332,6 +374,9 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
             }
             if origin.y < visible.minY + 8 {
                 origin.y = visible.minY + 8
+            }
+            if origin.y + height > visible.maxY {
+                origin.y = visible.maxY - height
             }
         }
 

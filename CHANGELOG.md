@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.13
+
+- Fixed a detached panel vanishing for good after a monitor was unplugged: detach the panel, park it on an external display, pull the HDMI cable, and the window was gone — invisible, unreachable, and still gone after quitting and relaunching, because the stranded position was persisted.
+- Root cause: the detached position is stored as raw global screen coordinates and was never validated against the displays actually connected. `applyFrame` fell back to the menu-bar screen when the corner was on no display, but only clamped `origin.x` and the bottom edge — never the top — so a position from a monitor arranged above (or taller than) the laptop stayed off-screen. Nothing reacted to a display disconnecting either.
+- New `DetachedPlacement.resolve` is the single placement rule for detached mode: it picks the connected display under the panel's fixed corner, otherwise the nearest remaining display (so with three monitors the panel lands next to the one that was unplugged, not always on the laptop), and clamps the corner so at least a collapsed panel's footprint is visible on it.
+- Every detached `applyFrame` goes through that rule. When it has to move the panel, the corrected position replaces the saved one in `UserDefaults`, so a stale position can never survive a relaunch; the diagnostics log records the before/after coordinates.
+- SOURCR now observes `NSApplication.didChangeScreenParametersNotification`: plugging, unplugging or rearranging displays re-places an open panel immediately — detached panels are rescued, and an anchored panel re-reads the status item's current display instead of keeping a stale `visibleFrame`.
+- `applyFrame` also clamps the top edge (`origin.y + height ≤ visibleFrame.maxY`) in both window modes, closing the vertical gap the old clamp left.
+- Verified live against a real stranded state on this Mac: saved detached corner `(323, 1410)` on a laptop whose visible frame tops out at 949pt; the fixed build logged the rescue, placed the panel at `(328, 949)` on the built-in display and persisted it.
+- Added `DetachedPlacementTests` covering an unplugged right-hand monitor, a monitor above (x in range, so an x-only clamp would leave it invisible), a left monitor with negative coordinates, nearest-display selection across three displays, keeping a valid position untouched, and the no-display case.
+- Removed the Quit footer from the bottom of the panel: it was a full-width bar holding a single button and cost ~32pt of every panel's height. The list now runs to the bottom edge, and `SOURCRLayout.chromeHeight` drops from 72 to 40 (header bar + divider) so content-fit panel heights shrink by the same amount instead of leaving a blank band.
+- Quit now lives at the end of Settings (both Diff and Actions settings) as a destructive **Quit SOURCR** row, below About.
+- Packaging / full-send: bump CFBundle version to `1.13`, ship `SOURCR.dmg` on GitHub release `v1.13`, and reinstall `/Applications/SOURCR.app` with launch-log proof for version/build `1.13`.
+
 ## 1.12
 
 - Actions is now a **branch board**, not a workflow-run list: one row per branch showing how far it has diverged from the default branch (behind ↓ / ahead ↑), its open pull request, and a single collapsed check state — the glance that previously required keeping GitHub's Branches page open in a browser tab.

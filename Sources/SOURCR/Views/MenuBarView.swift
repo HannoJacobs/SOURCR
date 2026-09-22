@@ -54,7 +54,6 @@ struct MenuBarView: View {
                 case .actions:
                     ActionsSCMView()
                 }
-                footerQuit
             }
         }
     }
@@ -153,30 +152,6 @@ struct MenuBarView: View {
             isActive: appState.isPanelPinned
         ) {
             appState.togglePanelPinned()
-        }
-    }
-
-    private var footerQuit: some View {
-        VStack(spacing: 0) {
-            Divider()
-            HStack {
-                Spacer()
-                Button {
-                    DispatchQueue.main.async {
-                        NSApplication.shared.terminate(nil)
-                    }
-                } label: {
-                    Text("Quit")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(PressableButtonStyle())
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
         }
     }
 }

@@ -456,3 +456,53 @@ struct BranchBoardTests {
         #expect(row.attentionRuns.isEmpty)
     }
 }
+
+struct DetachedPlacementTests {
+    // Built-in display at the origin; an external monitor to its right, and one above.
+    let laptop = CGRect(x: 0, y: 0, width: 1512, height: 944)
+    let rightMonitor = CGRect(x: 1512, y: 0, width: 2560, height: 1415)
+    let aboveMonitor = CGRect(x: 0, y: 982, width: 2560, height: 1415)
+
+    @Test func positionOnConnectedDisplayIsKept() throws {
+        let placed = try #require(DetachedPlacement.resolve(maxX: 3000, topY: 1200, visibleFrames: [laptop, rightMonitor]))
+        #expect(placed.maxX == 3000)
+        #expect(placed.topY == 1200)
+        #expect(placed.visibleFrame == rightMonitor)
+    }
+
+    @Test func unpluggedRightMonitorPullsPanelBackOntoLaptop() throws {
+        // Saved while on the external monitor, which has since been unplugged.
+        let placed = try #require(DetachedPlacement.resolve(maxX: 3000, topY: 1200, visibleFrames: [laptop]))
+        #expect(placed.visibleFrame == laptop)
+        #expect(placed.maxX <= laptop.maxX - DetachedPlacement.edgeInset)
+        #expect(placed.topY <= laptop.maxY)
+        #expect(placed.topY - SOURCRLayout.minPanelHeight >= laptop.minY)
+    }
+
+    @Test func unpluggedMonitorAboveClampsTheTopEdge() throws {
+        // x is inside the laptop's range, so an x-only clamp would leave it invisible.
+        let placed = try #require(DetachedPlacement.resolve(maxX: 1000, topY: 2200, visibleFrames: [laptop]))
+        #expect(placed.maxX == 1000)
+        #expect(placed.topY == laptop.maxY)
+    }
+
+    @Test func rescueLandsOnNearestRemainingDisplay() throws {
+        // Three displays, the far-right one unplugged: land on its neighbour, not the laptop.
+        let farRight = CGRect(x: 4072, y: 0, width: 1920, height: 1080)
+        let placed = try #require(DetachedPlacement.resolve(
+            maxX: farRight.midX, topY: 900, visibleFrames: [laptop, rightMonitor]
+        ))
+        #expect(placed.visibleFrame == rightMonitor)
+        #expect(rightMonitor.contains(CGPoint(x: placed.maxX - 1, y: placed.topY - 1)))
+    }
+
+    @Test func negativeCoordinatesOfLeftMonitorAreRescued() throws {
+        let placed = try #require(DetachedPlacement.resolve(maxX: -500, topY: 600, visibleFrames: [laptop]))
+        #expect(placed.maxX == laptop.minX + SOURCRLayout.scmWidth + DetachedPlacement.edgeInset)
+        #expect(placed.topY == 600)
+    }
+
+    @Test func noDisplaysYieldsNoPlacement() {
+        #expect(DetachedPlacement.resolve(maxX: 100, topY: 100, visibleFrames: []) == nil)
+    }
+}

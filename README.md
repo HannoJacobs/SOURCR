@@ -7,9 +7,9 @@ Menu bar icon
     └─ Anchored panel (right edge pinned to the status item)
          ├─ Diff pane (left, expands only when a file is selected)
          └─ SCM column (right, fixed width)
+              ├─ Header: Diff | Actions · Pin · Detach · Refresh · Add · Settings
               ├─ Multi-repo accordion (drag grip to reorder)
-              ├─ Flat changes + untracked list
-              └─ Footer: Refresh · Add · Settings · Quit
+              └─ Flat changes + untracked list (no footer; Quit lives in Settings)
 ```
 
 ## What it does
@@ -30,6 +30,7 @@ Menu bar icon
 - Git/`gh` child processes drain pipes while running and time out (so a huge `git status -uall` or stuck `gh` cannot freeze refreshes until quit)
 - In-flight Diff/`gh` refreshes are allowed to finish after the panel hides, so a quick open/close cannot leave a stale dirty count on screen
 - Panel stays on the status-item’s display across Diff ↔ Actions resizes (does not follow `NSScreen.main` / focus to another monitor)
+- A detached panel is always placed on a connected display: unplugging the monitor it sat on (or relaunching with a saved position from one) moves it onto the nearest remaining display
 
 ## What it never does
 
