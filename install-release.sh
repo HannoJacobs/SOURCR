@@ -11,7 +11,7 @@ require_command open
 require_command pgrep
 require_command pkill
 require_command readlink
-require_command rg
+require_command grep
 require_command stat
 
 require_file "$ARCHIVED_APP_PATH"
@@ -56,7 +56,7 @@ for _ in {1..30}; do
         current_log_target="$(readlink "$LATEST_LOG_PATH" || true)"
         if [ "$current_log_mtime" -gt "$previous_log_mtime" ] && \
            [ "$current_log_target" != "$previous_log_target" ] && \
-           rg -q "applicationDidFinishLaunching .*version=$expected_version .*build=$expected_build .*bundlePath=$INSTALLED_APP_PATH" "$LATEST_LOG_PATH"; then
+           grep -Eq "applicationDidFinishLaunching .*version=$expected_version .*build=$expected_build .*bundlePath=$INSTALLED_APP_PATH" "$LATEST_LOG_PATH"; then
             launch_verified=1
             break
         fi
@@ -67,7 +67,7 @@ done
 [ "$launch_verified" -eq 1 ] || fail "Launch log did not show version=$expected_version build=$expected_build bundlePath=$INSTALLED_APP_PATH in $LATEST_LOG_PATH"
 
 note "Launch verification evidence"
-rg -n "applicationDidFinishLaunching .*version=$expected_version .*build=$expected_build .*bundlePath=$INSTALLED_APP_PATH" "$LATEST_LOG_PATH"
+grep -En "applicationDidFinishLaunching .*version=$expected_version .*build=$expected_build .*bundlePath=$INSTALLED_APP_PATH" "$LATEST_LOG_PATH"
 
 echo "Installed app verified at $INSTALLED_APP_PATH"
 echo "Log evidence: $LATEST_LOG_PATH"
