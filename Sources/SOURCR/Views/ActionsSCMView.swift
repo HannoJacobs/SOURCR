@@ -60,7 +60,7 @@ struct ActionsSCMView: View {
                 .foregroundStyle(.tertiary)
             Text("No Actions Repositories")
                 .font(.system(size: 13, weight: .semibold))
-            Text("Add repos in Actions Settings — this list is separate from Diff.")
+            Text("Add a GitHub URL in Actions Settings. No local folder needed.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -122,7 +122,7 @@ private struct ActionsRepoAccordion: View {
                         .font(.system(size: 12, weight: .bold))
                         .lineLimit(1)
 
-                    if let remote = snap.remote {
+                    if let remote = repo.githubRemote {
                         Text(remote.slug)
                             .font(.system(size: 10, design: .monospaced))
                             .foregroundStyle(.tertiary)
@@ -154,9 +154,12 @@ private struct ActionsRepoAccordion: View {
             .buttonStyle(PressableButtonStyle())
             .background(Color.primary.opacity(0.06))
             .contextMenu {
-                Button("Reveal in Finder") {
-                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: repo.path)])
+                Button("Open on GitHub") {
+                    if let remote = repo.githubRemote, let url = URL(string: remote.webURL) {
+                        NSWorkspace.shared.open(url)
+                    }
                 }
+                .disabled(repo.githubRemote == nil)
                 Divider()
                 Button("Remove from Actions", role: .destructive) {
                     appState.removeRepo(repo, from: .actions)

@@ -1,6 +1,13 @@
 import AppKit
 import SwiftUI
 
+/// Borderless panels need to opt into keyboard focus for the repository field.
+/// The nonactivating style still keeps this an accessory panel.
+final class SOURCRPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
+}
+
 /// Menu-bar anchored panel. Right edge stays fixed; diff grows/shrinks to the left.
 ///
 /// Two window modes:
@@ -127,6 +134,7 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
         applyWindowMode()
         applyFrame()
         panel.orderFrontRegardless()
+        panel.makeKey()
         installOutsideClickMonitor()
         appState.isPanelVisible = true
         // Opening / bringing the panel forward: refresh Diff + Actions immediately
@@ -134,7 +142,7 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
         appState.refreshVisibleSurfaces(forceDiff: true, forceBranches: true)
         AppDiagnostics.info(
             .lifecycle,
-            "panel shown expanded=\(appState.isExpanded) pinned=\(appState.isPanelPinned) detached=\(appState.isPanelDetached)"
+            "panel shown expanded=\(appState.isExpanded) pinned=\(appState.isPanelPinned) detached=\(appState.isPanelDetached) key=\(panel.isKeyWindow)"
         )
     }
 
@@ -408,13 +416,14 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
         hosting.layer?.cornerRadius = 10
         hosting.layer?.masksToBounds = true
 
-        let p = NSPanel(
+        let p = SOURCRPanel(
             contentRect: NSRect(origin: .zero, size: size),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
         p.isOpaque = false
+        p.title = "SOURCR"
         p.backgroundColor = .clear
         p.hasShadow = true
         // Dragging is driven by the header handle so clicks on rows never move the window.

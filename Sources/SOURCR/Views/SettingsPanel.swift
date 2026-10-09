@@ -4,6 +4,9 @@ struct SettingsPanel: View {
     @Environment(AppState.self) private var appState
     @Binding var showingSettings: Bool
     @State private var measuredBodyHeight: CGFloat = 0
+    @State private var actionReference = ""
+    @State private var editingActionRepoID: UUID?
+    @State private var actionRepoError: String?
 
     private var mode: PanelMode { appState.panelMode }
     private var repos: [WatchedRepo] { appState.repos(for: mode) }
@@ -36,12 +39,23 @@ struct SettingsPanel: View {
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(repo.displayName)
                                             .font(.system(size: 12, weight: .semibold))
-                                        Text(repo.path)
+                                        Text(mode == .actions ? (repo.githubRemote?.slug ?? "GitHub link needed") : repo.path)
                                             .font(.system(size: 10, design: .monospaced))
                                             .foregroundStyle(.secondary)
                                             .lineLimit(2)
                                     }
                                     Spacer(minLength: 8)
+                                    if mode == .actions {
+                                        Button {
+                                            editingActionRepoID = repo.id
+                                            actionReference = repo.githubRemote?.webURL ?? ""
+                                            actionRepoError = nil
+                                        } label: {
+                                            Image(systemName: "pencil")
+                                        }
+                                        .buttonStyle(.plain)
+                                        .help("Set GitHub repository link")
+                                    }
                                     Button(role: .destructive) {
                                         appState.removeRepo(repo, from: mode)
                                     } label: {
@@ -54,17 +68,35 @@ struct SettingsPanel: View {
                             }
                         }
 
-                        Button {
-                            appState.presentOpenPanel(for: mode)
-                        } label: {
-                            Label("Add Repository…", systemImage: "folder.badge.plus")
+                        if mode == .actions {
+                            TextField("GitHub URL or owner/repo", text: $actionReference)
+                                .textFieldStyle(.roundedBorder)
+                                .onSubmit(saveActionRepository)
+                                .accessibilityLabel("GitHub repository")
+                            HStack {
+                                Button(editingActionRepoID == nil ? "Add Repository" : "Save Link", action: saveActionRepository)
+                                if editingActionRepoID != nil {
+                                    Button("Cancel") { resetActionEditor() }
+                                }
+                            }
+                            if let error = actionRepoError {
+                                Text(error)
+                                    .font(.caption)
+                                    .foregroundStyle(.red)
+                            }
+                        } else {
+                            Button {
+                                appState.presentOpenPanel()
+                            } label: {
+                                Label("Add Repository…", systemImage: "folder.badge.plus")
+                            }
                         }
                     } header: {
                         Text(mode == .diff ? "Diff Repositories" : "Actions Repositories")
                     } footer: {
                         Text(mode == .diff
                              ? "These repos appear only in Diff. Actions has its own list."
-                             : "These repos appear only in Actions. Diff has its own list.")
+                             : "Watch GitHub directly. Paste a repository URL or owner/repo; no local folder is needed.")
                     }
 
                     if mode == .actions {
@@ -123,5 +155,16 @@ struct SettingsPanel: View {
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private func saveActionRepository() {
+        actionRepoError = appState.saveActionRepository(actionReference, replacing: editingActionRepoID)
+        if actionRepoError == nil { resetActionEditor() }
+    }
+
+    private func resetActionEditor() {
+        actionReference = ""
+        editingActionRepoID = nil
+        actionRepoError = nil
     }
 }

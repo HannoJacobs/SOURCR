@@ -51,18 +51,27 @@ enum GitHubActionsService {
         return remote
     }
 
-    /// Accepts HTTPS, SSH, and SSH-host-alias remotes that point at GitHub.
+    static func migrateLegacyRepository(_ repo: WatchedRepo) -> WatchedRepo? {
+        if repo.githubRemote != nil { return repo }
+        if let remote = parseGitHubRemoteURL(repo.path) { return repo.linked(to: remote) }
+        guard FileManager.default.fileExists(atPath: repo.path),
+              let remote = try? resolveGitHubRemote(repoPath: repo.path) else { return nil }
+        return repo.linked(to: remote)
+    }
+
+    /// Accepts repository URLs, SSH origins (including existing host aliases),
+    /// and owner/repo. Reject subpages instead of watching the wrong repository.
     static func parseGitHubRemoteURL(_ raw: String) -> GitHubRemote? {
         let url = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !url.isEmpty else { return nil }
 
         // git@host:owner/repo.git
-        if let at = url.firstIndex(of: "@"),
+        if url.hasPrefix("git@"), let at = url.firstIndex(of: "@"),
            let colon = url[url.index(after: at)...].firstIndex(of: ":"),
            !url.lowercased().hasPrefix("ssh://"),
            !url.lowercased().hasPrefix("http") {
             let host = String(url[url.index(after: at)..<colon])
-            guard isGitHubHost(host) else { return nil }
+            guard isGitHubSSHHost(host) else { return nil }
             let path = String(url[url.index(after: colon)...])
             return remoteFromPath(path)
         }
@@ -70,27 +79,37 @@ enum GitHubActionsService {
         // ssh://git@host/owner/repo.git  or  https://host/owner/repo.git
         if let components = URLComponents(string: url),
            let host = components.host,
-           isGitHubHost(host) {
+           ["https", "ssh"].contains(components.scheme?.lowercased() ?? ""),
+           components.query == nil, components.fragment == nil,
+           components.password == nil,
+           (components.scheme?.lowercased() == "ssh"
+                ? isGitHubSSHHost(host)
+                : host.lowercased() == "github.com" && components.user == nil) {
             return remoteFromPath(components.path)
         }
 
-        return nil
+        guard !url.contains("://"), !url.hasPrefix("/") else { return nil }
+        return remoteFromPath(url)
     }
 
-    private static func isGitHubHost(_ host: String) -> Bool {
+    private static func isGitHubSSHHost(_ host: String) -> Bool {
         let lower = host.lowercased()
-        return lower == "github.com" || lower.hasSuffix(".github.com") || lower.contains("github.com")
+        return lower == "github.com" || lower.hasPrefix("github.com-")
     }
 
     private static func remoteFromPath(_ path: String) -> GitHubRemote? {
         let trimmed = path
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
             .replacingOccurrences(of: ".git", with: "", options: [.caseInsensitive, .anchored, .backwards])
-        let parts = trimmed.split(separator: "/").map(String.init)
-        guard parts.count >= 2 else { return nil }
-        let owner = parts[parts.count - 2]
-        let name = parts[parts.count - 1]
-        guard !owner.isEmpty, !name.isEmpty else { return nil }
+        let parts = trimmed.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+        guard parts.count == 2 else { return nil }
+        let owner = parts[0]
+        let name = parts[1]
+        let ownerChars = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-")
+        let repoChars = ownerChars.union(CharacterSet(charactersIn: "._"))
+        guard !owner.isEmpty, !name.isEmpty, name != ".", name != "..",
+              owner.unicodeScalars.allSatisfy({ ownerChars.contains($0) }),
+              name.unicodeScalars.allSatisfy({ repoChars.contains($0) }) else { return nil }
         return GitHubRemote(owner: owner, name: name)
     }
 

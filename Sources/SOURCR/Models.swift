@@ -37,11 +37,25 @@ struct WatchedRepo: Identifiable, Codable, Hashable {
     var id: UUID
     var path: String
     var displayName: String
+    /// Actions owns a GitHub reference; Diff continues to own a local path.
+    /// Missing only on old saved entries that still need conversion.
+    var githubRemote: GitHubRemote?
 
     init(id: UUID = UUID(), path: String, displayName: String? = nil) {
         self.id = id
         self.path = path
         self.displayName = displayName ?? URL(fileURLWithPath: path).lastPathComponent
+    }
+
+    init(id: UUID = UUID(), remote: GitHubRemote, displayName: String? = nil) {
+        self.id = id
+        self.path = remote.webURL
+        self.displayName = displayName ?? remote.name
+        self.githubRemote = remote
+    }
+
+    func linked(to remote: GitHubRemote) -> WatchedRepo {
+        WatchedRepo(id: id, remote: remote, displayName: displayName)
     }
 }
 
@@ -185,6 +199,8 @@ struct GitHubRemote: Hashable, Codable {
     var name: String
 
     var slug: String { "\(owner)/\(name)" }
+    var webURL: String { "https://github.com/\(slug)" }
+    var identity: String { slug.lowercased() }
 }
 
 struct ActionRun: Identifiable, Hashable {

@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.15
+
+- Actions now watches GitHub repositories directly. Moving or deleting a local checkout no longer interrupts CI/CD status, branch activity, divergence, pull request links, or workflow inspection once the GitHub reference is saved.
+- Replaced the Actions folder picker with a repository field in Actions Settings. Paste a GitHub repository URL, an SSH origin URL, or owner/repo; the Actions header's Add button opens this form without asking for a local directory.
+- The borderless accessory panel now permits keyboard focus and becomes key when opened so the repository field supports typing, paste, and Return while retaining its nonactivating window style. Its accessible window title is SOURCR.
+- Each Actions entry persists its GitHub owner and repository name alongside a canonical GitHub URL. Both list polling and selected-run job/step detail use that saved reference and never inspect a local origin during refresh.
+- Existing folder-based watches migrate once when their origin is still available. Conversion retains their UUID, display name, list position, and expansion state; the independent Diff entry keeps its original local path.
+- Watches whose folders were already removed stay visible with a clear instruction to set the GitHub link in Actions Settings. A pencil button can repair the link or update an existing watch without removing and recreating its identity.
+- Repository entry validates the GitHub host and repository path, rejecting malformed links and GitHub subpages that could otherwise select the wrong owner/repository. HTTPS and SSH forms remain supported, including existing GitHub SSH host aliases, and duplicate watches are rejected regardless of capitalization.
+- Actions repository headers show the saved owner/repository, and their context menu opens the repository on GitHub. Local Finder navigation remains available in Diff, whose local watch and read-only git behavior are unchanged.
+- Editing or removing a remote watch invalidates its in-flight Actions requests so a late response cannot restore obsolete data. Successful refresh and detail diagnostics record the GitHub source for installed-app verification.
+- Added regression coverage for legacy preference decoding, stable identity through conversion, saved origin references surviving deletion of a real temporary checkout, accepted URL/SSH/slug inputs, and invalid or ambiguous repository links.
+- Packaging: version and build are 1.15. The full-send release publishes SOURCR.dmg on GitHub release v1.15 and installs the current build to /Applications/SOURCR.app with launch and remote-Actions behavior evidence.
+
 ## 1.14
 
 - Fixed an empty "SOURCR Settings" window appearing on screen. SOURCR was started through the SwiftUI `App` lifecycle, which requires at least one scene, and the only scene it declared was an empty `Settings { EmptyView() }` placeholder kept just to satisfy that requirement. Whenever macOS reopened the running app (launching it again from Finder, Spotlight, `open -a`, or a login item firing while it was already running), SwiftUI presented that placeholder as a large blank, titled window behind the menu-bar panel.

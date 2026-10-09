@@ -80,7 +80,7 @@ struct MenuBarView: View {
                     appState.refreshAll(force: true)
                 }
                 HeaderIconButton(systemName: "folder.badge.plus", help: "Add Diff Repository") {
-                    appState.presentOpenPanel(for: .diff)
+                    appState.presentOpenPanel()
                 }
                 HeaderIconButton(systemName: "gearshape", help: "Diff Settings") {
                     showingSettings = true
@@ -93,8 +93,8 @@ struct MenuBarView: View {
                 ) {
                     appState.refreshActions(forceBranches: true)
                 }
-                HeaderIconButton(systemName: "folder.badge.plus", help: "Add Actions Repository") {
-                    appState.presentOpenPanel(for: .actions)
+                HeaderIconButton(systemName: "plus", help: "Add GitHub Repository") {
+                    showingSettings = true
                 }
                 HeaderIconButton(systemName: "gearshape", help: "Actions Settings") {
                     showingSettings = true

@@ -15,10 +15,12 @@ Menu bar icon
 ## What it does
 
 - Lives in the menu bar (`LSUIElement`)
-- Watch local git repositories for **Diff** and separately for **Actions** (independent lists)
+- Watch local git repositories for **Diff** and GitHub repositories for **Actions** (independent lists)
 - **Diff mode:** Shows combined staged + dirty changes and untracked files on the **current branch**
 - Click a file to open a diff to the left (Inline or Side By Side); click again to collapse
-- **Actions mode:** Lists GitHub Actions for Actions-list repos (newest run per workflow name)
+- **Actions mode:** Shows active remote branches, divergence, pull requests, and the newest run per branch/workflow; GitHub links work without any local checkout
+- Add an Actions repository with its GitHub URL, SSH origin, or `owner/repo` in Actions Settings; the header’s Add button opens that form
+- Existing Actions folder watches convert to saved GitHub links once; if a folder was already removed, use its pencil button in Actions Settings to set the link
 - Click a workflow run to expand job/step detail to the left (same leftward expand as Diff); click again to collapse
 - Mode-specific Settings manage which repos belong to Diff vs Actions
 - Defaults to Side By Side + Wrap; both live in Diff Settings
@@ -46,6 +48,7 @@ Read-only by design: `GitService` only allows `status`, `diff`, `show`, `rev-par
 - macOS 14+
 - Xcode (for Release `.app` / DMG packaging)
 - `git` on `PATH` (`/usr/bin/git`)
+- GitHub CLI (`gh`) signed in with access to watched repositories for Actions
 
 ## Develop
 
