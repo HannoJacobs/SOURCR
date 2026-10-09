@@ -41,6 +41,8 @@ struct WatchedRepo: Identifiable, Codable, Hashable {
     /// Missing only on old saved entries that still need conversion.
     var githubRemote: GitHubRemote?
 
+    var actionsTitle: String { githubRemote?.name ?? displayName }
+
     init(id: UUID = UUID(), path: String, displayName: String? = nil) {
         self.id = id
         self.path = path
@@ -200,6 +202,7 @@ struct GitHubRemote: Hashable, Codable {
 
     var slug: String { "\(owner)/\(name)" }
     var webURL: String { "https://github.com/\(slug)" }
+    var branchesURL: String { "\(webURL)/branches/all" }
     var identity: String { slug.lowercased() }
 }
 

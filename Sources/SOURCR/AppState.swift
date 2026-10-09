@@ -901,7 +901,7 @@ final class AppState {
             )
             AppDiagnostics.debug(
                 .appState,
-                "actions repo=\(repo.displayName) remote=\(remote.slug) source=github localCheckoutRequired=false runs=\(runs.count) running=\(runs.filter(\.isRunning).count) branches=\(branches.count)"
+                "actions repo=\(repo.actionsTitle) remote=\(remote.slug) branchesURL=\(remote.branchesURL) source=github localCheckoutRequired=false runs=\(runs.count) running=\(runs.filter(\.isRunning).count) branches=\(branches.count)"
             )
         } catch is CancellationError {
             return

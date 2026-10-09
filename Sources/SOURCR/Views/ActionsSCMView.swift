@@ -106,56 +106,63 @@ private struct ActionsRepoAccordion: View {
     private var header: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             let activities = appState.branchActivities(for: repo, now: context.date)
-            Button {
-                withAnimation(.easeInOut(duration: 0.12)) {
-                    appState.toggleRepoAccordion(repo.id, in: .actions)
-                }
-                appState.selectRepo(repo)
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: isOpen ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 10)
+            HStack(spacing: 0) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.12)) {
+                        appState.toggleRepoAccordion(repo.id, in: .actions)
+                    }
+                    appState.selectRepo(repo)
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: isOpen ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 10)
 
-                    Text(repo.displayName)
-                        .font(.system(size: 12, weight: .bold))
-                        .lineLimit(1)
-
-                    if let remote = repo.githubRemote {
-                        Text(remote.slug)
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundStyle(.tertiary)
+                        Text(repo.actionsTitle)
+                            .font(.system(size: 12, weight: .bold))
                             .lineLimit(1)
-                            .truncationMode(.head)
-                    }
 
-                    Spacer(minLength: 4)
+                        Spacer(minLength: 4)
 
-                    let running = activities.filter { $0.state == .running }.count
-                    let failed = activities.filter { $0.state == .failed }.count
-                    if running > 0 {
-                        badge("\(running)", color: Color.orange)
+                        let running = activities.filter { $0.state == .running }.count
+                        let failed = activities.filter { $0.state == .failed }.count
+                        if running > 0 {
+                            badge("\(running)", color: Color.orange)
+                        }
+                        if failed > 0 {
+                            badge("\(failed)", color: Color.red.opacity(0.85))
+                        }
+                        if running == 0, failed == 0, !activities.isEmpty {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(.green)
+                        }
                     }
-                    if failed > 0 {
-                        badge("\(failed)", color: Color.red.opacity(0.85))
-                    }
-                    if running == 0, failed == 0, !activities.isEmpty {
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(.green)
-                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
+                .buttonStyle(PressableButtonStyle())
+
+                if let remote = repo.githubRemote, let url = URL(string: remote.branchesURL) {
+                    Link(destination: url) {
+                        Image(systemName: "link")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.blue)
+                            .padding(9)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(PressableButtonStyle())
+                    .help("Open \(remote.slug) · All branches on GitHub")
+                    .accessibilityLabel("Open \(repo.actionsTitle) branches on GitHub")
+                }
             }
-            .buttonStyle(PressableButtonStyle())
             .background(Color.primary.opacity(0.06))
             .contextMenu {
-                Button("Open on GitHub") {
-                    if let remote = repo.githubRemote, let url = URL(string: remote.webURL) {
+                Button("Open all branches on GitHub") {
+                    if let remote = repo.githubRemote, let url = URL(string: remote.branchesURL) {
                         NSWorkspace.shared.open(url)
                     }
                 }

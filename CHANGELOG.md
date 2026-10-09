@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.16
+
+- Added a visible GitHub link button at the right edge of each Actions repository header. Opening a repository's branch list now takes one direct click from the board instead of requiring a context-menu action.
+- The button uses the standard chain-link symbol in blue, with a semibold 13pt icon and the same padded click target, so it reads as a link without adding a box around the symbol.
+- The link opens the repository's /branches/all page, selecting GitHub's All view so the default branch and the other branches are available together. It uses the saved GitHub repository reference and requires no local checkout.
+- Actions headings now use the repository's actual GitHub name: PPA-Wrapper replaces the saved Practice-Partner-Agent label, practice-agent-ui replaces cards-ui, and Experiments replaces ilab_experiments.
+- Removed the secondary owner/repository text from Actions headers. The heading is a single repository name, leaving more room for the live running/failed badges and the new navigation button.
+- Kept the link and accordion controls separate. Clicking the repository name or chevron still expands/collapses its branch rows; clicking the external-link icon opens GitHub without selecting or collapsing the repository.
+- The navigation button includes pressed feedback, a tooltip containing the full owner/repository and All-branches destination, and an accessible label describing the action. Repositories awaiting a repaired GitHub link retain their prior label for identification and do not expose a misleading destination.
+- Actions Settings also displays the GitHub repository name as its heading, while retaining the owner/repository reference underneath for identification. Existing saved IDs, order and collapse state remain intact; Diff keeps its local repository names and paths.
+- Updated the repository context menu to open the same All-branches page as the new visible button. Existing per-branch links, pull request links, run details, polling cadence and activity-window filtering retain their behavior.
+- Successful Actions refresh diagnostics record the exact repository title and branches URL shared with the rendered header. These provide installed-build evidence that the requested remote name and destination are in use.
+- Packaging: version/build1.16, SOURCR.dmg on GitHub release v1.16, current local Release artifacts, and /Applications/SOURCR.app installation and relaunch with concrete version/path/Actions metadata proof.
+
 ## 1.15
 
 - Actions now watches GitHub repositories directly. Moving or deleting a local checkout no longer interrupts CI/CD status, branch activity, divergence, pull request links, or workflow inspection once the GitHub reference is saved.
