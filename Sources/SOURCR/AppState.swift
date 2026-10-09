@@ -269,6 +269,10 @@ final class AppState {
     init() {
         loadPrefs()
         refreshAll(force: true)
+        Task {
+            await migrateActionsRepositories()
+            refreshActions(forceBranches: true)
+        }
         startAutoRefresh()
         AppDiagnostics.info(
             .appState,
@@ -355,8 +359,53 @@ final class AppState {
         rewireFileWatchers()
     }
 
-    func addRepo(path: String, to mode: PanelMode? = nil) {
-        let target = mode ?? panelMode
+    /// Converts old folder watches once. After conversion all polling uses the
+    /// saved GitHub reference, even if the original checkout disappears.
+    private func migrateActionsRepositories() async {
+        let legacy = actionsRepos.filter { $0.githubRemote == nil }
+        let converted = await Task.detached(priority: .utility) {
+            legacy.compactMap(GitHubActionsService.migrateLegacyRepository)
+        }.value
+        for repo in converted {
+            guard let remote = repo.githubRemote,
+                  let index = actionsRepos.firstIndex(where: { $0.id == repo.id && $0.githubRemote == nil }) else { continue }
+            actionsRepos[index] = repo
+            AppDiagnostics.info(.appState, "migrated Actions repo=\(repo.displayName) remote=\(remote.slug) source=github")
+        }
+        if !converted.isEmpty { saveRepos() }
+    }
+
+    /// Returns a validation message; nil means the watch was saved.
+    func saveActionRepository(_ reference: String, replacing repoID: UUID? = nil) -> String? {
+        guard let remote = GitHubActionsService.parseGitHubRemoteURL(reference) else {
+            return "Enter a GitHub repository URL or owner/repo."
+        }
+        guard !actionsRepos.contains(where: { $0.id != repoID && $0.githubRemote?.identity == remote.identity }) else {
+            return "Already watching \(remote.slug)."
+        }
+        if let repoID {
+            guard let index = actionsRepos.firstIndex(where: { $0.id == repoID }) else {
+                return "This repository was removed. Add it again."
+            }
+            actionsRepos[index] = actionsRepos[index].linked(to: remote)
+            if selectedActionRunID?.hasPrefix("\(repoID.uuidString):") == true { clearActionSelection() }
+            actionsSnapshots.removeValue(forKey: repoID)
+        } else {
+            let repo = WatchedRepo(remote: remote)
+            actionsRepos.append(repo)
+            selectedRepoID = repo.id
+        }
+        // Editing a link must not accept a late response from its previous remote.
+        cancelActionsWork()
+        statusMessage = nil
+        saveRepos()
+        refreshActions(forceBranches: true)
+        AppDiagnostics.info(.appState, "saved Actions remote=\(remote.slug) source=github localCheckoutRequired=false")
+        return nil
+    }
+
+    func addRepo(path: String) {
+        let target = PanelMode.diff
         Task {
             do {
                 let root = try await Task.detached(priority: .userInitiated) {
@@ -367,9 +416,7 @@ final class AppState {
                     statusMessage = "Already in \(target.title): \(URL(fileURLWithPath: root).lastPathComponent)"
                     return
                 }
-                // Reuse the same identity if the other mode already watches this path.
-                let other = target == .diff ? actionsRepos : diffRepos
-                let repo = other.first(where: { $0.path == root }) ?? WatchedRepo(path: root)
+                let repo = WatchedRepo(path: root)
                 list.append(repo)
                 setRepos(list, for: target)
                 selectedRepoID = repo.id
@@ -387,6 +434,10 @@ final class AppState {
 
     func removeRepo(_ repo: WatchedRepo, from mode: PanelMode? = nil) {
         let target = mode ?? panelMode
+        if target == .actions { cancelActionsWork() }
+        if target == .actions, selectedActionRunID?.hasPrefix("\(repo.id.uuidString):") == true {
+            clearActionSelection()
+        }
         var list = repos(for: target)
         list.removeAll { $0.id == repo.id }
         setRepos(list, for: target)
@@ -406,11 +457,9 @@ final class AppState {
         if target == .diff, diffRepoID == repo.id {
             clearDiffSelection()
         }
-        if target == .actions, selectedActionRun?.repoID == repo.id {
-            clearActionSelection()
-        }
         pruneCollapsedRepos()
         saveRepos()
+        if target == .actions { refreshActions() }
     }
 
     func selectRepo(_ repo: WatchedRepo) {
@@ -608,8 +657,7 @@ final class AppState {
         }
     }
 
-    func presentOpenPanel(for mode: PanelMode? = nil) {
-        let target = mode ?? panelMode
+    func presentOpenPanel() {
         // LSUIElement / popover context: first NSOpenPanel is often half-dead
         // (grayed Favorites sidebar) unless we dismiss the popover, briefly become
         // a regular app, activate, then restore accessory policy afterward.
@@ -626,12 +674,7 @@ final class AppState {
             panel.allowsMultipleSelection = true
             panel.canCreateDirectories = false
             panel.treatsFilePackagesAsDirectories = true
-            switch target {
-            case .diff:
-                panel.message = "Choose git repositories for Diff (read-only)"
-            case .actions:
-                panel.message = "Choose git repositories for Actions (GitHub origin)"
-            }
+            panel.message = "Choose git repositories for Diff (read-only)"
             panel.prompt = "Add"
 
             let response = panel.runModal()
@@ -644,7 +687,7 @@ final class AppState {
 
             guard response == .OK else { return }
             for url in panel.urls {
-                self.addRepo(path: url.path, to: target)
+                self.addRepo(path: url.path)
             }
         }
     }
@@ -802,14 +845,13 @@ final class AppState {
     }
 
     private func refreshActionsRepoAsync(_ repo: WatchedRepo, generation: Int, forceBranches: Bool) async {
-        let path = repo.path
         let repoID = repo.id
         let previous = actionsSnapshots[repoID] ?? .empty
 
         do {
-            let remote = try await Task.detached(priority: .utility) {
-                try GitHubActionsService.resolveGitHubRemote(repoPath: path)
-            }.value
+            guard let remote = repo.githubRemote else {
+                throw GitHubActionsError.invalidJSON("Set this repository's GitHub link in Actions Settings. Its old local folder is unavailable.")
+            }
 
             try Task.checkCancellation()
             guard generation == actionsRefreshGeneration else { return }
@@ -859,7 +901,7 @@ final class AppState {
             )
             AppDiagnostics.debug(
                 .appState,
-                "actions repo=\(repo.displayName) remote=\(remote.slug) runs=\(runs.count) running=\(runs.filter(\.isRunning).count) branches=\(branches.count)"
+                "actions repo=\(repo.displayName) remote=\(remote.slug) source=github localCheckoutRequired=false runs=\(runs.count) running=\(runs.filter(\.isRunning).count) branches=\(branches.count)"
             )
         } catch is CancellationError {
             return
@@ -907,7 +949,6 @@ final class AppState {
 
     private func loadActionDetailAsync(for run: ActionRun) async {
         guard let repo = actionsRepos.first(where: { $0.id == run.repoID }) else { return }
-        let path = repo.path
         actionDetailGeneration += 1
         let generation = actionDetailGeneration
         isLoadingActionDetail = selectedActionDetail == nil
@@ -918,9 +959,9 @@ final class AppState {
         }
 
         do {
-            let remote = try await Task.detached(priority: .utility) {
-                try GitHubActionsService.resolveGitHubRemote(repoPath: path)
-            }.value
+            guard let remote = repo.githubRemote else {
+                throw GitHubActionsError.invalidJSON("Set this repository's GitHub link in Actions Settings.")
+            }
 
             try Task.checkCancellation()
             guard generation == actionDetailGeneration, selectedActionRunID == run.id else { return }
@@ -929,6 +970,7 @@ final class AppState {
 
             guard generation == actionDetailGeneration, selectedActionRunID == run.id else { return }
             selectedActionDetail = detail
+            AppDiagnostics.debug(.appState, "action detail remote=\(remote.slug) source=github run=\(run.databaseId) jobs=\(detail.jobs.count)")
 
             // Keep list row in sync with live status/conclusion.
             if var snap = actionsSnapshots[run.repoID] {

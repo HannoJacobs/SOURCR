@@ -111,6 +111,26 @@ struct DiffParserTests {
 }
 
 struct GitHubRemoteParseTests {
+    @Test(arguments: [
+        "HannoJacobs/SOURCR", " https://github.com/HannoJacobs/SOURCR/ \n",
+        "ssh://git@github.com/HannoJacobs/SOURCR.git", "git@github.com-personal:HannoJacobs/SOURCR.git"
+    ]) func acceptsRepositoryReferences(_ reference: String) {
+        #expect(GitHubActionsService.parseGitHubRemoteURL(reference)?.slug == "HannoJacobs/SOURCR")
+    }
+
+    @Test(arguments: [
+        "https://github.com/HannoJacobs/SOURCR/actions",
+        "https://github.com.evil.example/HannoJacobs/SOURCR",
+        "https://example.com/HannoJacobs/SOURCR",
+        "https://github.com/HannoJacobs/SOURCR?token=private",
+        "https://github.com/HannoJacobs/SOURCR#branch",
+        "https://user:password@github.com/HannoJacobs/SOURCR",
+        "/Users/repository", "HannoJacobs", "HannoJacobs//SOURCR",
+        "owner/..", "owner/repo name", "file://github.com/owner/repo"
+    ]) func rejectsAmbiguousOrInvalidReferences(_ reference: String) {
+        #expect(GitHubActionsService.parseGitHubRemoteURL(reference) == nil)
+    }
+
     @Test func parsesSSHAliasRemote() {
         let remote = GitHubActionsService.parseGitHubRemoteURL(
             "git@github.com-hb:hb-innovation-lab/PPA-Wrapper.git"
@@ -137,6 +157,42 @@ struct GitHubRemoteParseTests {
         #expect(GitHubActionsService.formatDuration(16) == "16s")
         #expect(GitHubActionsService.formatDuration(89) == "1m29s")
         #expect(GitHubActionsService.formatDuration(3614) == "1h00m14s")
+    }
+}
+
+struct ActionsRepositoryMigrationTests {
+    @Test func oldSavedEntryKeepsIdentityAndName() throws {
+        let id = UUID()
+        let data = Data("""
+        [{"id":"\(id)","path":"/missing/local/checkout","displayName":"My CI"}]
+        """.utf8)
+        let legacy = try #require(JSONDecoder().decode([WatchedRepo].self, from: data).first)
+        #expect(legacy.githubRemote == nil)
+        #expect(GitHubActionsService.migrateLegacyRepository(legacy) == nil)
+        let linked = legacy.linked(to: GitHubRemote(owner: "HannoJacobs", name: "SOURCR"))
+        let restored = try JSONDecoder().decode(WatchedRepo.self, from: JSONEncoder().encode(linked))
+        #expect(restored.id == id)
+        #expect(restored.displayName == "My CI")
+        #expect(restored.path == "https://github.com/HannoJacobs/SOURCR")
+        #expect(restored.githubRemote?.identity == "hannojacobs/sourcr")
+        #expect(legacy.path == "/missing/local/checkout")
+    }
+
+    @Test func originIsSavedBeforeCheckoutDisappears() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("sourcr-origin-\(UUID())")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        for arguments in [["init"], ["remote", "add", "origin", "git@github.com-hb:hb-innovation-lab/PPA-Wrapper.git"]] {
+            _ = try ExternalProcess.run(executable: "/usr/bin/git", arguments: arguments, currentDirectory: root.path, environment: ProcessInfo.processInfo.environment, timeout: 5)
+        }
+        let legacy = WatchedRepo(path: root.path, displayName: "Practice-Partner-Agent")
+        let linked = try #require(GitHubActionsService.migrateLegacyRepository(legacy))
+        try FileManager.default.removeItem(at: root)
+        let restored = try JSONDecoder().decode(WatchedRepo.self, from: JSONEncoder().encode(linked))
+        #expect(restored.id == legacy.id)
+        #expect(restored.githubRemote?.slug == "hb-innovation-lab/PPA-Wrapper")
+        #expect(GitHubActionsService.migrateLegacyRepository(restored) == restored)
+        #expect(restored.path == "https://github.com/hb-innovation-lab/PPA-Wrapper")
     }
 }
 
