@@ -37,7 +37,7 @@ struct SettingsPanel: View {
                             ForEach(repos) { repo in
                                 HStack(alignment: .top, spacing: 8) {
                                     VStack(alignment: .leading, spacing: 2) {
-                                        Text(repo.displayName)
+                                        Text(mode == .actions ? repo.actionsTitle : repo.displayName)
                                             .font(.system(size: 12, weight: .semibold))
                                         Text(mode == .actions ? (repo.githubRemote?.slug ?? "GitHub link needed") : repo.path)
                                             .font(.system(size: 10, design: .monospaced))
