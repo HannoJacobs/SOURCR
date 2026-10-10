@@ -105,3 +105,5 @@ Launch evidence is written to:
 
 - Prefer pressable rows / button styles with hover feedback so clicks feel acknowledged.
 - Ad-hoc signing is the default; Gatekeeper rejection is expected.
+
+Release app bundles and archives are kept in `build-release.noindex` so they do not appear as extra apps in Spotlight. DMG staging is removed on exit; `install-release.sh` uses the retained signed app from that directory.
