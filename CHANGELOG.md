@@ -1,5 +1,17 @@
 # Changelog
 
+
+## 1.17
+
+- SOURCR now keeps its release archive and signed app in `build-release.noindex`. The app remains available to the normal installer while the build folder is excluded from Spotlight, preventing build products from appearing beside the installed app as extra launch choices.
+- Packaging and installation continue to share `release-common.sh` as the source of their paths. Both scripts now resolve the retained signed app from the excluded directory, so an installer cannot silently pick up a previous bundle from the old build location.
+- DMG staging is also inside the excluded build directory while packaging is running. The final disk-image file keeps its existing name and repository-root location, and its app name, Applications shortcut and normal drag-to-install contents retain their contracts.
+- The packaging script installs an exit cleanup for `dmg-staging`. That temporary folder and its second app copy are removed on a successful package or on a failed build, signature verification, staging copy or disk-image creation; the signed app needed for installation is retained.
+- Cleanup captures the original failure status before attempting removal, so callers still receive the actual build or packaging failure. A removal failure after otherwise successful packaging is reported and returns a nonzero status rather than claiming all cleanup completed.
+- The generated build path is explicitly ignored by Git. Retained archives, signed app bundles and intermediate products stay outside source control, without broad changes to macOS Spotlight preferences, indexing state, application settings or user data locations.
+- SOURCR keeps its existing read-only Diff and Actions behavior, saved watches, polling and GitHub links. This release only changes build and packaging artifact handling; no git-mutating capability or new application-side data operation is introduced.
+- App version and build advance together to 1.17 to identify this release. Installation still uses the existing signature checks and requires a fresh launch log with the expected version, build and `/Applications/SOURCR.app` bundle path; the app UI and its saved preferences are unchanged.
+
 ## 1.16
 
 - Added a visible GitHub link button at the right edge of each Actions repository header. Opening a repository's branch list now takes one direct click from the board instead of requiring a context-menu action.
