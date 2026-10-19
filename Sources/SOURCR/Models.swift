@@ -40,6 +40,8 @@ struct WatchedRepo: Identifiable, Codable, Hashable {
     /// Actions owns a GitHub reference; Diff continues to own a local path.
     /// Missing only on old saved entries that still need conversion.
     var githubRemote: GitHubRemote?
+    /// SOURCR-owned account binding; nil on legacy watches until explicitly selected.
+    var githubAccount: String?
 
     var actionsTitle: String { githubRemote?.name ?? displayName }
 
@@ -57,7 +59,9 @@ struct WatchedRepo: Identifiable, Codable, Hashable {
     }
 
     func linked(to remote: GitHubRemote) -> WatchedRepo {
-        WatchedRepo(id: id, remote: remote, displayName: displayName)
+        var repo = WatchedRepo(id: id, remote: remote, displayName: displayName)
+        repo.githubAccount = githubAccount
+        return repo
     }
 }
 

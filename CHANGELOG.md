@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.18
+
+- Added a GitHub account picker to the Actions repository editor. Each watched repository stores its own explicit account choice, including when an existing watch is edited, and restores it after app relaunches and Mac restarts. Older watches ask for a choice rather than silently adopting the globally active account.
+- Added a + connection flow with a secure personal access token field. SOURCR verifies the token against GitHub before storing it under its own Keychain service; only the verified account name is saved in app preferences. The same flow can replace an expired credential for that account.
+- Existing GitHub CLI account names are available in the picker. On explicit selection SOURCR reads that named account’s credential, checks that it belongs to the intended login and saves an independent copy for its own requests. Importing never logs in, switches the active account or rewrites CLI credentials.
+- Every workflow, job-detail, branch, divergence and pull-request request now uses the repository’s selected credential. Child processes receive a clean environment and a SOURCR-specific CLI configuration directory, excluding inherited tokens, host overrides and debug flags.
+- Missing credentials fail with an instruction to choose or reconnect the repository’s account. SOURCR never falls back to the global CLI account. Rebinding a repository clears its cached runs and detail and invalidates pending requests so an older account’s response cannot repopulate the view.
+- Kept account tokens out of preferences, command arguments and diagnostics. CLI credential import captures its secret output in memory; normal GitHub error text redacts the selected token before reaching the UI or app logs.
+- Added regression coverage for account binding persistence, backward-compatible watch decoding, preservation during remote migration, subprocess isolation and missing-account failures. Existing Diff operations remain read-only and account connections do not modify Git settings or other projects.
+- Advanced app version and build to 1.18. Updated setup documentation with account selection, token permissions, credential replacement and the distinction between SOURCR’s account choice and the browser’s separate login for external links.
+
+
 
 ## 1.17
 

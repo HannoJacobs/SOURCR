@@ -115,7 +115,7 @@ enum GitHubActionsService {
 
     // MARK: - Runs
 
-    static func listRuns(remote: GitHubRemote, repoID: UUID, limit: Int = 30) async throws -> [ActionRun] {
+    static func listRuns(remote: GitHubRemote, repoID: UUID, limit: Int = 30, credential: GitHubCredential) async throws -> [ActionRun] {
         try Task.checkCancellation()
         let json = try await runGH([
             "run", "list",
@@ -123,7 +123,7 @@ enum GitHubActionsService {
             "--limit", "\(limit)",
             "--json",
             "databaseId,status,conclusion,displayTitle,name,headBranch,createdAt,startedAt,updatedAt,url,event,workflowName,attempt"
-        ])
+        ], credential: credential)
 
         guard let data = json.data(using: .utf8) else {
             throw GitHubActionsError.invalidJSON("Empty run list")
@@ -133,14 +133,14 @@ enum GitHubActionsService {
         return rows.map { $0.asActionRun(repoID: repoID) }
     }
 
-    static func loadRunDetail(remote: GitHubRemote, run: ActionRun) async throws -> ActionRunDetail {
+    static func loadRunDetail(remote: GitHubRemote, run: ActionRun, credential: GitHubCredential) async throws -> ActionRunDetail {
         try Task.checkCancellation()
         let json = try await runGH([
             "run", "view", "\(run.databaseId)",
             "--repo", remote.slug,
             "--json",
             "databaseId,status,conclusion,displayTitle,name,headBranch,createdAt,startedAt,updatedAt,url,event,workflowName,attempt,jobs"
-        ])
+        ], credential: credential)
 
         guard let data = json.data(using: .utf8) else {
             throw GitHubActionsError.invalidJSON("Empty run detail")
@@ -169,11 +169,12 @@ enum GitHubActionsService {
     /// divergence from the default branch.
     static func loadBranches(
         remote: GitHubRemote,
-        defaultBranchHint: String?
+        defaultBranchHint: String?,
+        credential: GitHubCredential
     ) async throws -> (branches: [BranchInfo], defaultBranch: String) {
         try Task.checkCancellation()
 
-        let heads = try await loadBranchHeads(remote: remote)
+        let heads = try await loadBranchHeads(remote: remote, credential: credential)
         // Self-heals if the default branch changed since the cached hint.
         let base = heads.defaultBranch ?? defaultBranchHint ?? "main"
 
@@ -184,12 +185,12 @@ enum GitHubActionsService {
 
         let divergence = recent.isEmpty
             ? [:]
-            : try await loadDivergence(remote: remote, branches: Array(recent))
+            : try await loadDivergence(remote: remote, branches: Array(recent), credential: credential)
 
         // Non-fatal: a PR hiccup must not blank out divergence and the branch list too.
         var pullRequests: [String: BranchPullRequest] = [:]
         do {
-            pullRequests = try await loadPullRequestsByHeadBranch(remote: remote)
+            pullRequests = try await loadPullRequestsByHeadBranch(remote: remote, credential: credential)
         } catch is CancellationError {
             throw CancellationError()
         } catch {
@@ -223,7 +224,7 @@ enum GitHubActionsService {
     }
 
     private static func loadBranchHeads(
-        remote: GitHubRemote
+        remote: GitHubRemote, credential: GitHubCredential
     ) async throws -> (heads: [BranchHead], defaultBranch: String?) {
         var heads: [BranchHead] = []
         var defaultBranch: String?
@@ -242,7 +243,7 @@ enum GitHubActionsService {
                 arguments.append(contentsOf: ["-f", "after=\(cursor)"])
             }
 
-            let json = try await runGH(arguments)
+            let json = try await runGH(arguments, credential: credential)
             guard let data = json.data(using: .utf8) else {
                 throw GitHubActionsError.invalidJSON("Empty branch list")
             }
@@ -282,7 +283,7 @@ enum GitHubActionsService {
     /// this branch?". Ordered by most recently updated, so the first hit per branch is the
     /// current one and 100 comfortably covers any branch recent enough to be displayed.
     static func loadPullRequestsByHeadBranch(
-        remote: GitHubRemote
+        remote: GitHubRemote, credential: GitHubCredential
     ) async throws -> [String: BranchPullRequest] {
         try Task.checkCancellation()
 
@@ -291,7 +292,7 @@ enum GitHubActionsService {
             "-f", "query=\(pullRequestsQuery)",
             "-f", "owner=\(remote.owner)",
             "-f", "name=\(remote.name)"
-        ])
+        ], credential: credential)
 
         guard let data = json.data(using: .utf8) else {
             throw GitHubActionsError.invalidJSON("Empty pull request list")
@@ -328,7 +329,7 @@ enum GitHubActionsService {
     /// Aliases are generated (`b0`, `b1`, …) because branch names are not valid GraphQL names.
     private static func loadDivergence(
         remote: GitHubRemote,
-        branches: [String]
+        branches: [String], credential: GitHubCredential
     ) async throws -> [String: BranchDivergence] {
         try Task.checkCancellation()
 
@@ -353,7 +354,7 @@ enum GitHubActionsService {
             "-f", "query=\(query)",
             "-f", "owner=\(remote.owner)",
             "-f", "name=\(remote.name)"
-        ])
+        ], credential: credential)
 
         guard let data = json.data(using: .utf8) else {
             throw GitHubActionsError.invalidJSON("Empty divergence response")
@@ -423,14 +424,14 @@ enum GitHubActionsService {
     // MARK: - gh process
 
     /// Same temp-file + watchdog runner as git (`ExternalProcess`).
-    private static func runGH(_ arguments: [String]) async throws -> String {
-        guard let executable = resolveGHPath() else {
+    private static func runGH(_ arguments: [String], credential: GitHubCredential) async throws -> String {
+        guard let executable = SOURCRGitHubEnvironment.executable else {
             throw GitHubActionsError.ghNotFound
         }
 
         try Task.checkCancellation()
 
-        let environment = ghEnvironment()
+        let environment = SOURCRGitHubEnvironment.authenticated(credential)
         do {
             return try await Task.detached(priority: .utility) {
                 try ExternalProcess.run(
@@ -445,38 +446,10 @@ enum GitHubActionsService {
         } catch ExternalProcessError.timedOut(let seconds) {
             throw GitHubActionsError.timedOut(seconds)
         } catch ExternalProcessError.failed(let status, let stderr) {
-            throw GitHubActionsError.ghFailed(status: status, stderr: stderr)
+            throw GitHubActionsError.ghFailed(status: status, stderr: stderr.replacingOccurrences(of: credential.token, with: "[redacted]"))
         }
     }
 
-    private static func ghEnvironment() -> [String: String] {
-        var env = ProcessInfo.processInfo.environment
-        let path = env["PATH"] ?? ""
-        if !path.contains("/opt/homebrew/bin") {
-            env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:" + path
-        }
-        if env["HOME"] == nil {
-            env["HOME"] = NSHomeDirectory()
-        }
-        env["GH_PROMPT_DISABLED"] = "1"
-        env["GH_NO_UPDATE_NOTIFIER"] = "1"
-        if env["LC_ALL"] == nil {
-            env["LC_ALL"] = "C"
-        }
-        return env
-    }
-
-    private static func resolveGHPath() -> String? {
-        let candidates = [
-            "/opt/homebrew/bin/gh",
-            "/usr/local/bin/gh",
-            "/usr/bin/gh"
-        ]
-        for path in candidates where FileManager.default.isExecutableFile(atPath: path) {
-            return path
-        }
-        return nil
-    }
 
     static func parseDate(_ raw: String?) -> Date {
         parseDateIfPresent(raw) ?? Date.distantPast

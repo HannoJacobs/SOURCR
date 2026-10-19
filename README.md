@@ -49,7 +49,7 @@ Read-only by design: `GitService` only allows `status`, `diff`, `show`, `rev-par
 - macOS 14+
 - Xcode (for Release `.app` / DMG packaging)
 - `git` on `PATH` (`/usr/bin/git`)
-- GitHub CLI (`gh`) signed in with access to watched repositories for Actions
+- GitHub CLI (`gh`) installed for Actions. Choose a GitHub account per repository in Actions Settings; SOURCR stores its own credential copy in Keychain.
 
 ## Develop
 
@@ -107,3 +107,25 @@ Launch evidence is written to:
 - Ad-hoc signing is the default; Gatekeeper rejection is expected.
 
 Release app bundles and archives are kept in `build-release.noindex` so they do not appear as extra apps in Spotlight. DMG staging is removed on exit; `install-release.sh` uses the retained signed app from that directory.
+
+### GitHub accounts in SOURCR
+
+Actions Settings has a **GitHub account** picker beside the repository editor.
+Choose an account when adding a repository, or use the pencil beside an existing
+watch to change its account. Watches created before 1.18 require an explicit
+selection. The binding persists in SOURCR preferences across relaunches and reboots.
+
+Existing CLI account names appear in the picker. Saving a selection reads that
+specific account's credential once, verifies its identity, and copies it into
+SOURCR's own Keychain service (`com.hannojacobs.SOURCR.github`). The **+** button
+connects a new account, or replaces an expired token, using a secure personal
+access token field. For fine-grained tokens, select the required repositories
+and grant read access to Actions, Contents and Pull requests; organization
+approval or SSO authorization may also be needed. Tokens are never saved in
+preferences, command-line arguments, logs or source control.
+
+Every Actions request uses the selected SOURCR credential in an isolated child
+process environment. SOURCR never runs `gh auth login`, `gh auth switch`,
+`gh auth setup-git` or configuration writes. Adding an account does not register
+it with the CLI. Missing or rejected credentials produce an error and never fall
+back to another account. External GitHub links still use the browser's own login.

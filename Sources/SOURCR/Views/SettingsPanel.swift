@@ -8,6 +8,13 @@ struct SettingsPanel: View {
     @State private var editingActionRepoID: UUID?
     @State private var actionRepoError: String?
 
+    @State private var selectedAccount = ""
+    @State private var showingAccountForm = false
+    @State private var newToken = ""
+    @State private var accountError: String?
+    @State private var isSavingAccount = false
+    @State private var isSavingRepository = false
+
     private var mode: PanelMode { appState.panelMode }
     private var repos: [WatchedRepo] { appState.repos(for: mode) }
 
@@ -39,6 +46,11 @@ struct SettingsPanel: View {
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(mode == .actions ? repo.actionsTitle : repo.displayName)
                                             .font(.system(size: 12, weight: .semibold))
+                                        if mode == .actions {
+                                            Text(repo.githubAccount.map { "GitHub: \($0)" } ?? "Choose a GitHub account")
+                                                .font(.caption)
+                                                .foregroundStyle(repo.githubAccount == nil ? Color.orange : Color.secondary)
+                                        }
                                         Text(mode == .actions ? (repo.githubRemote?.slug ?? "GitHub link needed") : repo.path)
                                             .font(.system(size: 10, design: .monospaced))
                                             .foregroundStyle(.secondary)
@@ -49,12 +61,14 @@ struct SettingsPanel: View {
                                         Button {
                                             editingActionRepoID = repo.id
                                             actionReference = repo.githubRemote?.webURL ?? ""
+                                            selectedAccount = repo.githubAccount ?? ""
                                             actionRepoError = nil
                                         } label: {
                                             Image(systemName: "pencil")
                                         }
                                         .buttonStyle(.plain)
-                                        .help("Set GitHub repository link")
+                                        .disabled(isSavingRepository || isSavingAccount)
+                                        .help("Edit repository and GitHub account")
                                     }
                                     Button(role: .destructive) {
                                         appState.removeRepo(repo, from: mode)
@@ -63,6 +77,7 @@ struct SettingsPanel: View {
                                             .foregroundStyle(.red.opacity(0.85))
                                     }
                                     .buttonStyle(.plain)
+                                    .disabled(isSavingRepository || isSavingAccount)
                                     .help("Remove from \(mode.title)")
                                 }
                             }
@@ -71,12 +86,31 @@ struct SettingsPanel: View {
                         if mode == .actions {
                             TextField("GitHub URL or owner/repo", text: $actionReference)
                                 .textFieldStyle(.roundedBorder)
+                                .disabled(isSavingRepository || isSavingAccount)
                                 .onSubmit(saveActionRepository)
                                 .accessibilityLabel("GitHub repository")
                             HStack {
-                                Button(editingActionRepoID == nil ? "Add Repository" : "Save Link", action: saveActionRepository)
+                                Picker("GitHub account", selection: $selectedAccount) {
+                                    Text("Choose account…").tag("")
+                                    ForEach(appState.githubAccounts.logins, id: \.self) { login in
+                                        Text(login).tag(login)
+                                    }
+                                }
+                                .disabled(isSavingRepository || isSavingAccount)
+                                .accessibilityLabel("GitHub account for repository")
+                                Button {
+                                    showingAccountForm.toggle()
+                                    accountError = nil
+                                } label: { Image(systemName: "plus") }
+                                .help("Connect GitHub account to SOURCR")
+                                .accessibilityLabel("Connect GitHub account")
+                            }
+                            HStack {
+                                Button(editingActionRepoID == nil ? "Add Repository" : "Save Repository", action: saveActionRepository)
+                                    .disabled(isSavingRepository || isSavingAccount)
+                                if isSavingRepository { ProgressView().controlSize(.small) }
                                 if editingActionRepoID != nil {
-                                    Button("Cancel") { resetActionEditor() }
+                                    Button("Cancel") { resetActionEditor() }.disabled(isSavingRepository)
                                 }
                             }
                             if let error = actionRepoError {
@@ -100,6 +134,39 @@ struct SettingsPanel: View {
                     }
 
                     if mode == .actions {
+                        if showingAccountForm {
+                            Section("Connect GitHub Account") {
+                                SecureField("Personal access token", text: $newToken)
+                                    .textFieldStyle(.roundedBorder)
+                                    .accessibilityLabel("GitHub personal access token")
+                                Text("Connect or replace a token for its GitHub account. Stored only in SOURCR’s Keychain entry.")
+                                    .font(.caption).foregroundStyle(.secondary)
+                                Text("For a fine-grained token, select the repositories and allow read access to Actions, Contents and Pull requests. Organization approval may be required.")
+                                    .font(.caption).foregroundStyle(.secondary)
+                                Link("Create a token on GitHub", destination: URL(string: "https://github.com/settings/personal-access-tokens/new")!)
+                                HStack {
+                                    Button("Connect Account", action: connectAccount)
+                                        .disabled(newToken.isEmpty || isSavingAccount || isSavingRepository)
+                                    if isSavingAccount { ProgressView().controlSize(.small) }
+                                    Button("Cancel") {
+                                        showingAccountForm = false
+                                        newToken = ""
+                                        accountError = nil
+                                    }.disabled(isSavingAccount)
+                                }
+                                if let accountError { Text(accountError).font(.caption).foregroundStyle(.red) }
+                            }
+                        }
+                        Section {
+                            Text("Account choices apply only to SOURCR. Existing CLI credentials are copied when selected; CLI login and Git settings stay untouched.")
+                                .font(.caption).foregroundStyle(.secondary)
+                            if let error = appState.githubAccounts.discoveryError {
+                                Text(error).font(.caption).foregroundStyle(.secondary)
+                                Button("Retry account discovery") {
+                                    Task { await appState.githubAccounts.discoverCLIAccounts() }
+                                }
+                            }
+                        }
                         Section {
                             LabeledContent("Show branches") {
                                 BranchWindowPicker()
@@ -155,15 +222,54 @@ struct SettingsPanel: View {
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
+        .task { await appState.githubAccounts.discoverCLIAccounts() }
+        .onDisappear { newToken = "" }
+    }
+
+    private func connectAccount() {
+        isSavingAccount = true
+        accountError = nil
+        let token = newToken
+        newToken = ""
+        Task {
+            defer { isSavingAccount = false }
+            do {
+                let login = try await appState.githubAccounts.connectToken(token)
+                appState.githubCredentialChanged(login: login)
+                selectedAccount = login
+                showingAccountForm = false
+            } catch { accountError = error.localizedDescription }
+        }
     }
 
     private func saveActionRepository() {
-        actionRepoError = appState.saveActionRepository(actionReference, replacing: editingActionRepoID)
-        if actionRepoError == nil { resetActionEditor() }
+        guard !isSavingRepository, !isSavingAccount else { return }
+        guard !selectedAccount.isEmpty else {
+            actionRepoError = "Choose a GitHub account or connect one with +."
+            return
+        }
+        guard GitHubActionsService.parseGitHubRemoteURL(actionReference) != nil else {
+            actionRepoError = "Enter a GitHub repository URL or owner/repo."
+            return
+        }
+        let reference = actionReference
+        let repoID = editingActionRepoID
+        let account = selectedAccount
+        isSavingRepository = true
+        actionRepoError = nil
+        Task {
+            defer { isSavingRepository = false }
+            do {
+                try await appState.githubAccounts.connectExisting(account)
+                actionRepoError = appState.saveActionRepository(reference, replacing: repoID, account: account)
+                if actionRepoError == nil { resetActionEditor() }
+            } catch { actionRepoError = error.localizedDescription }
+        }
     }
 
     private func resetActionEditor() {
         actionReference = ""
+        selectedAccount = ""
         editingActionRepoID = nil
         actionRepoError = nil
     }
