@@ -272,10 +272,13 @@ struct ActionRun: Identifiable, Hashable {
         )
     }
 
-    /// Newer run wins (createdAt, then higher attempt, then databaseId).
+    /// Compare the latest attempt, since a rerun keeps its original creation date.
     func isNewerThan(_ other: ActionRun) -> Bool {
+        if databaseId == other.databaseId, attempt != other.attempt { return attempt > other.attempt }
+        let start = timingStart ?? .distantPast
+        let otherStart = other.timingStart ?? .distantPast
+        if start != otherStart { return start > otherStart }
         if createdAt != other.createdAt { return createdAt > other.createdAt }
-        if attempt != other.attempt { return attempt > other.attempt }
         return databaseId > other.databaseId
     }
 }
@@ -491,11 +494,11 @@ enum BranchActivityWindow: String, CaseIterable, Identifiable {
     }
 }
 
-/// One branch plus the newest run per workflow on it — the Actions list row.
+/// One branch plus active runs, or the latest completed attempt per workflow.
 struct BranchActivity: Identifiable, Hashable {
     let repoID: UUID
     let branch: BranchInfo
-    /// Newest run per workflow name on this branch.
+    /// All active runs, or the latest completed attempt per workflow on this branch.
     let runs: [ActionRun]
 
     var id: String { "\(repoID.uuidString):\(branch.name)" }
@@ -560,23 +563,22 @@ struct RepoActionsSnapshot: Hashable {
         branchesFetchedAt: nil
     )
 
-    /// One entry per (branch, workflow): the newest run only.
-    /// Deduping by workflow name alone would collide CI on `develop` with CI on a feature branch.
-    var latestRunsByBranchAndWorkflow: [ActionRun] {
-        var best: [String: ActionRun] = [:]
-        for run in runs {
-            let key = "\(run.headBranch)\u{0000}\(run.workflowName)"
-            if let existing = best[key], !run.isNewerThan(existing) { continue }
-            best[key] = run
+    /// Keep every active run; otherwise show the most recently started attempt
+    /// for each (branch, workflow). A later green run must never hide active work.
+    var boardRuns: [ActionRun] {
+        let groups = Dictionary(grouping: runs) { "\($0.headBranch)\u{0000}\($0.workflowName)" }
+        return groups.values.flatMap { group -> [ActionRun] in
+            let active = group.filter(\.isRunning)
+            if !active.isEmpty { return active }
+            return group.sorted { $0.isNewerThan($1) }.prefix(1).map { $0 }
         }
-        return Array(best.values)
     }
 
     /// Branch rows for the panel, filtered by the activity window and sorted
     /// running → failed → clean, then most recently touched.
     func branchActivities(repoID: UUID, window: BranchActivityWindow, now: Date) -> [BranchActivity] {
         var runsByBranch: [String: [ActionRun]] = [:]
-        for run in latestRunsByBranchAndWorkflow {
+        for run in boardRuns {
             runsByBranch[run.headBranch, default: []].append(run)
         }
 
@@ -594,7 +596,7 @@ struct RepoActionsSnapshot: Hashable {
                     runs: (runsByBranch[branch.name] ?? []).sorted { $0.createdAt > $1.createdAt }
                 )
             }
-            .filter { window.includes($0.lastActivityAt, now: now) }
+            .filter { !$0.runningRuns.isEmpty || window.includes($0.lastActivityAt, now: now) }
             .sorted { a, b in
                 if a.sortRank != b.sortRank { return a.sortRank < b.sortRank }
                 if a.lastActivityAt != b.lastActivityAt { return a.lastActivityAt > b.lastActivityAt }

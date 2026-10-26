@@ -919,6 +919,12 @@ final class AppState {
                 .appState,
                 "actions account=\(repo.githubAccount ?? "unassigned") repo=\(repo.actionsTitle) remote=\(remote.slug) branchesURL=\(remote.branchesURL) source=github localCheckoutRequired=false runs=\(runs.count) running=\(runs.filter(\.isRunning).count) branches=\(branches.count)"
             )
+            let activities = branchActivities(for: repo)
+            let visibleActive = activities.flatMap(\.runningRuns)
+            if !visibleActive.isEmpty {
+                AppDiagnostics.debug(.appState,
+                    "actions board repo=\(remote.slug) runningBranches=\(activities.filter { $0.state == .running }.count) activeRuns=\(visibleActive.map { "\($0.databaseId):attempt=\($0.attempt):\($0.status)" }.sorted().joined(separator: ","))")
+            }
         } catch is CancellationError {
             return
         } catch {

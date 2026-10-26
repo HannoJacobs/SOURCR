@@ -305,6 +305,8 @@ struct BranchBoardTests {
         conclusion: String?,
         ageSeconds: TimeInterval,
         durationSeconds: TimeInterval = 90,
+        createdAgeSeconds: TimeInterval? = nil,
+        attempt: Int = 1,
         databaseId: Int = Int.random(in: 1...1_000_000)
     ) -> ActionRun {
         let started = now.addingTimeInterval(-ageSeconds)
@@ -317,11 +319,11 @@ struct BranchBoardTests {
             event: "push",
             status: status,
             conclusion: conclusion,
-            createdAt: started,
+            createdAt: now.addingTimeInterval(-(createdAgeSeconds ?? ageSeconds)),
             startedAt: started,
             updatedAt: started.addingTimeInterval(durationSeconds),
             url: "",
-            attempt: 1
+            attempt: attempt
         )
     }
 
@@ -370,6 +372,41 @@ struct BranchBoardTests {
 
         let all = snap.branchActivities(repoID: repoID, window: .all, now: now)
         #expect(Set(all.map(\.branch.name)) == ["develop", "stale/old-thing"])
+    }
+
+    @Test func olderRunRerunningNowSurvivesANewerGreenRun() {
+        let green = run("Root Deploy Prod", branch: "main", status: "completed", conclusion: "success", ageSeconds: 1_800, databaseId: 2)
+        let rerun = run("Root Deploy Prod", branch: "main", status: "in_progress", conclusion: nil, ageSeconds: 600, createdAgeSeconds: 2_100, attempt: 2, databaseId: 1)
+        for runs in [[green, rerun], [rerun, green]] {
+            let snap = snapshot(branches: [branch("main", ageSeconds: 1_800)], runs: runs)
+            let row = snap.branchActivities(repoID: repoID, window: .day, now: now)[0]
+            #expect(row.state == .running)
+            #expect(row.attentionRuns.map(\.databaseId) == [1])
+            #expect(row.runs[0].attempt == 2)
+            #expect(row.runs[0].elapsed(at: now) == 600)
+        }
+    }
+
+    @Test func activeRunsCannotBeHiddenByLaterRunsOrTheActivityWindow() {
+        let runs = [
+            run("Deploy", branch: "main", status: "in_progress", conclusion: nil, ageSeconds: 2 * 86_400, databaseId: 1),
+            run("Deploy", branch: "main", status: "queued", conclusion: nil, ageSeconds: 2 * 86_400, databaseId: 2),
+            run("Deploy", branch: "main", status: "completed", conclusion: "success", ageSeconds: 86_400, databaseId: 3)
+        ]
+        let snap = snapshot(branches: [branch("main", ageSeconds: 3 * 86_400)], runs: runs)
+        let rows = snap.branchActivities(repoID: repoID, window: .day, now: now)
+        #expect(rows.count == 1)
+        #expect(Set(rows[0].runningRuns.map(\.databaseId)) == [1, 2])
+    }
+
+    @Test func finishedRerunUsesItsLatestAttemptAndThenYieldsToLaterWork() {
+        let green = run("Deploy", branch: "main", status: "completed", conclusion: "success", ageSeconds: 1_800, databaseId: 2)
+        let rerun = run("Deploy", branch: "main", status: "completed", conclusion: "failure", ageSeconds: 600, createdAgeSeconds: 2_100, attempt: 2, databaseId: 1)
+        let snap = snapshot(branches: [branch("main", ageSeconds: 1_800)], runs: [green, rerun])
+        #expect(snap.boardRuns.map(\.databaseId) == [1])
+        #expect(snap.branchActivities(repoID: repoID, window: .day, now: now)[0].state == .failed)
+        let later = run("Deploy", branch: "main", status: "completed", conclusion: "success", ageSeconds: 100, databaseId: 3)
+        #expect(snapshot(branches: [], runs: [green, rerun, later]).boardRuns.map(\.databaseId) == [3])
     }
 
     @Test func aRunKeepsAnOtherwiseStaleBranchOnTheBoard() {
