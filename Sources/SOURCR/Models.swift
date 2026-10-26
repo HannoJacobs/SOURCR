@@ -510,8 +510,8 @@ struct BranchActivity: Identifiable, Hashable {
     /// The noise rule: only running and failed runs earn a row of their own.
     /// Running first (live timers), then failures (newest first).
     var attentionRuns: [ActionRun] {
-        let running = runningRuns.sorted { $0.createdAt > $1.createdAt }
-        let failed = failedRuns.sorted { $0.createdAt > $1.createdAt }
+        let running = runningRuns.sorted { $0.isNewerThan($1) }
+        let failed = failedRuns.sorted { $0.isNewerThan($1) }
         return running + failed
     }
 
@@ -593,7 +593,7 @@ struct RepoActionsSnapshot: Hashable {
                 BranchActivity(
                     repoID: repoID,
                     branch: branch,
-                    runs: (runsByBranch[branch.name] ?? []).sorted { $0.createdAt > $1.createdAt }
+                    runs: (runsByBranch[branch.name] ?? []).sorted { $0.isNewerThan($1) }
                 )
             }
             .filter { !$0.runningRuns.isEmpty || window.includes($0.lastActivityAt, now: now) }

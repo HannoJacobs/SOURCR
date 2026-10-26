@@ -409,6 +409,31 @@ struct BranchBoardTests {
         #expect(snapshot(branches: [], runs: [green, rerun, later]).boardRuns.map(\.databaseId) == [3])
     }
 
+    @Test func completedWorkflowOrderIsStableAcrossRefreshesAndInputOrders() {
+        let runs = [101, 202, 303].map { id in
+            run("Workflow \(id)", branch: "main", status: "completed", conclusion: "success", ageSeconds: 600, databaseId: id)
+        }
+        for _ in 0..<30 {
+            let snap = snapshot(branches: [branch("main", ageSeconds: 600)], runs: runs.shuffled())
+            let rows = snap.branchActivities(repoID: repoID, window: .day, now: now)
+            #expect(rows[0].runs.map(\.databaseId) == [303, 202, 101])
+        }
+    }
+
+    @Test func attentionWorkflowOrderHasStableTies() {
+        let runs = [
+            run("Running A", branch: "main", status: "in_progress", conclusion: nil, ageSeconds: 600, databaseId: 302),
+            run("Running B", branch: "main", status: "queued", conclusion: nil, ageSeconds: 600, databaseId: 303),
+            run("Failed A", branch: "main", status: "completed", conclusion: "failure", ageSeconds: 600, databaseId: 200),
+            run("Failed B", branch: "main", status: "completed", conclusion: "failure", ageSeconds: 600, databaseId: 201)
+        ]
+        for _ in 0..<30 {
+            let snap = snapshot(branches: [branch("main", ageSeconds: 600)], runs: runs.shuffled())
+            let rows = snap.branchActivities(repoID: repoID, window: .day, now: now)
+            #expect(rows[0].attentionRuns.map(\.databaseId) == [303, 302, 201, 200])
+        }
+    }
+
     @Test func aRunKeepsAnOtherwiseStaleBranchOnTheBoard() {
         // Last commit is 3 days old, but CI fired 10 minutes ago — still working on it.
         let snap = snapshot(
