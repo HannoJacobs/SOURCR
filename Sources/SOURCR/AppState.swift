@@ -266,6 +266,8 @@ final class AppState {
         panelMode == .actions && selectedActionRunID == run.id && isExpanded
     }
 
+    let githubAccounts = GitHubAccounts()
+
     init() {
         loadPrefs()
         refreshAll(force: true)
@@ -376,7 +378,8 @@ final class AppState {
     }
 
     /// Returns a validation message; nil means the watch was saved.
-    func saveActionRepository(_ reference: String, replacing repoID: UUID? = nil) -> String? {
+    func saveActionRepository(_ reference: String, replacing repoID: UUID? = nil, account: String? = nil) -> String? {
+        guard let account, !account.isEmpty else { return "Choose a GitHub account." }
         guard let remote = GitHubActionsService.parseGitHubRemoteURL(reference) else {
             return "Enter a GitHub repository URL or owner/repo."
         }
@@ -388,10 +391,12 @@ final class AppState {
                 return "This repository was removed. Add it again."
             }
             actionsRepos[index] = actionsRepos[index].linked(to: remote)
+            actionsRepos[index].githubAccount = account
             if selectedActionRunID?.hasPrefix("\(repoID.uuidString):") == true { clearActionSelection() }
             actionsSnapshots.removeValue(forKey: repoID)
         } else {
-            let repo = WatchedRepo(remote: remote)
+            var repo = WatchedRepo(remote: remote)
+            repo.githubAccount = account
             actionsRepos.append(repo)
             selectedRepoID = repo.id
         }
@@ -402,6 +407,15 @@ final class AppState {
         refreshActions(forceBranches: true)
         AppDiagnostics.info(.appState, "saved Actions remote=\(remote.slug) source=github localCheckoutRequired=false")
         return nil
+    }
+
+    func githubCredentialChanged(login: String) {
+        cancelActionsWork()
+        clearActionSelection()
+        for repo in actionsRepos where repo.githubAccount?.lowercased() == login.lowercased() {
+            actionsSnapshots.removeValue(forKey: repo.id)
+        }
+        refreshActions(forceBranches: true)
     }
 
     func addRepo(path: String) {
@@ -858,7 +872,8 @@ final class AppState {
 
             // 50 (not 20): the branch board splits runs across every active branch,
             // so a short window would drop workflows for all but the busiest branch.
-            let runs = try await GitHubActionsService.listRuns(remote: remote, repoID: repoID, limit: 50)
+            let credential = try await githubAccounts.credential(for: repo.githubAccount)
+            let runs = try await GitHubActionsService.listRuns(remote: remote, repoID: repoID, limit: 50, credential: credential)
 
             guard !Task.isCancelled, generation == actionsRefreshGeneration else { return }
 
@@ -870,7 +885,8 @@ final class AppState {
                 do {
                     let loaded = try await GitHubActionsService.loadBranches(
                         remote: remote,
-                        defaultBranchHint: previous.defaultBranch
+                        defaultBranchHint: previous.defaultBranch,
+                        credential: credential
                     )
                     guard !Task.isCancelled, generation == actionsRefreshGeneration else { return }
                     branches = loaded.branches
@@ -901,8 +917,14 @@ final class AppState {
             )
             AppDiagnostics.debug(
                 .appState,
-                "actions repo=\(repo.actionsTitle) remote=\(remote.slug) branchesURL=\(remote.branchesURL) source=github localCheckoutRequired=false runs=\(runs.count) running=\(runs.filter(\.isRunning).count) branches=\(branches.count)"
+                "actions account=\(repo.githubAccount ?? "unassigned") repo=\(repo.actionsTitle) remote=\(remote.slug) branchesURL=\(remote.branchesURL) source=github localCheckoutRequired=false runs=\(runs.count) running=\(runs.filter(\.isRunning).count) branches=\(branches.count)"
             )
+            let activities = branchActivities(for: repo)
+            let visibleActive = activities.flatMap(\.runningRuns)
+            if !visibleActive.isEmpty {
+                AppDiagnostics.debug(.appState,
+                    "actions board repo=\(remote.slug) runningBranches=\(activities.filter { $0.state == .running }.count) activeRuns=\(visibleActive.map { "\($0.databaseId):attempt=\($0.attempt):\($0.status)" }.sorted().joined(separator: ","))")
+            }
         } catch is CancellationError {
             return
         } catch {
@@ -966,7 +988,8 @@ final class AppState {
             try Task.checkCancellation()
             guard generation == actionDetailGeneration, selectedActionRunID == run.id else { return }
 
-            let detail = try await GitHubActionsService.loadRunDetail(remote: remote, run: run)
+            let credential = try await githubAccounts.credential(for: repo.githubAccount)
+            let detail = try await GitHubActionsService.loadRunDetail(remote: remote, run: run, credential: credential)
 
             guard generation == actionDetailGeneration, selectedActionRunID == run.id else { return }
             selectedActionDetail = detail

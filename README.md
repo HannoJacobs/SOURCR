@@ -18,7 +18,7 @@ Menu bar icon
 - Watch local git repositories for **Diff** and GitHub repositories for **Actions** (independent lists)
 - **Diff mode:** Shows combined staged + dirty changes and untracked files on the **current branch**
 - Click a file to open a diff to the left (Inline or Side By Side); click again to collapse
-- **Actions mode:** Shows active remote branches, divergence, pull requests, and the newest run per branch/workflow; GitHub links work without any local checkout
+- **Actions mode:** Shows active remote branches, divergence, pull requests, and all active runs per branch/workflow, falling back to the latest completed attempt; GitHub links work without any local checkout
 - Add an Actions repository with its GitHub URL, SSH origin, or `owner/repo` in Actions Settings; the header’s Add button opens that form
 - Existing Actions folder watches convert to saved GitHub links once; if a folder was already removed, use its pencil button in Actions Settings to set the link
 - Click a workflow run to expand job/step detail to the left (same leftward expand as Diff); click again to collapse
@@ -49,7 +49,7 @@ Read-only by design: `GitService` only allows `status`, `diff`, `show`, `rev-par
 - macOS 14+
 - Xcode (for Release `.app` / DMG packaging)
 - `git` on `PATH` (`/usr/bin/git`)
-- GitHub CLI (`gh`) signed in with access to watched repositories for Actions
+- GitHub CLI (`gh`) installed for Actions. Choose a GitHub account per repository in Actions Settings; SOURCR stores its own credential copy in Keychain.
 
 ## Develop
 
@@ -97,7 +97,7 @@ Launch evidence is written to:
 | `GitHubActionsService` | Read-only `gh` Actions list/detail + remote URL parse |
 | `DiffParser` | Unified + side-by-side rendering model |
 | `VSCodeSCMView` | Right-column multi-repo SCM + drag reorder |
-| `ActionsSCMView` | Right-column Actions list (latest run per workflow) |
+| `ActionsSCMView` | Right-column Actions list (active runs or latest completed attempt per workflow) |
 | `DiffPane` / `ActionsDetailPane` | Left-expand detail for file diffs or workflow steps |
 | `SettingsPanel` | Viewer controls (right column overlay) |
 
@@ -107,3 +107,25 @@ Launch evidence is written to:
 - Ad-hoc signing is the default; Gatekeeper rejection is expected.
 
 Release app bundles and archives are kept in `build-release.noindex` so they do not appear as extra apps in Spotlight. DMG staging is removed on exit; `install-release.sh` uses the retained signed app from that directory.
+
+### GitHub accounts in SOURCR
+
+Actions Settings has a **GitHub account** picker beside the repository editor.
+Choose an account when adding a repository, or use the pencil beside an existing
+watch to change its account. Watches created before 1.18 require an explicit
+selection. The binding persists in SOURCR preferences across relaunches and reboots.
+
+Existing CLI account names appear in the picker. Saving a selection reads that
+specific account's credential once, verifies its identity, and copies it into
+SOURCR's own Keychain service (`com.hannojacobs.SOURCR.github`). The **+** button
+connects a new account, or replaces an expired token, using a secure personal
+access token field. For fine-grained tokens, select the required repositories
+and grant read access to Actions, Contents and Pull requests; organization
+approval or SSO authorization may also be needed. Tokens are never saved in
+preferences, command-line arguments, logs or source control.
+
+Every Actions request uses the selected SOURCR credential in an isolated child
+process environment. SOURCR never runs `gh auth login`, `gh auth switch`,
+`gh auth setup-git` or configuration writes. Adding an account does not register
+it with the CLI. Missing or rejected credentials produce an error and never fall
+back to another account. External GitHub links still use the browser's own login.

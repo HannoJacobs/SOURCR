@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.19
+
+- Fixed the Actions board hiding an active rerun behind a newer-created successful run of the same workflow. The repository and branch could previously show green even while the polled GitHub response already contained running work.
+- Workflow grouping now keeps every active run on each branch. Concurrent runs of the same workflow remain available as separate selectable rows, and a later successful run cannot erase an older run that is still in progress or queued.
+- When no run is active, the board chooses the most recently started attempt. GitHub preserves a workflow run's original creation date when it is rerun, so the original date no longer decides which completed result represents that workflow.
+- The latest-attempt comparison falls back to creation time when the start timestamp is unavailable, preserving the existing timestamp validation and elapsed-duration behavior. Run identity and detail selection continue to use the repository and GitHub database ID.
+- Active runs on existing branches remain visible even when their timestamps fall outside the selected branch activity window. The activity cutoff continues to hide old completed branch history, and deleted remote branches retain their existing removal behavior.
+- Added regression tests for an older-created run on attempt two competing with a newer green run, both input orders, multiple active runs of one workflow, long-running work beyond the activity window, rerun completion, and a subsequent fresh run superseding it.
+- Added installed-app diagnostics for the board's visible active run IDs, attempt numbers, statuses and running-branch count. These distinguish work fetched from GitHub from work actually retained for display without logging credentials or workflow payloads.
+- Advanced version and build to 1.19 and updated the Actions documentation to describe active runs and completed attempts. The fix retains the existing read-only GitHub polling, account isolation, local Diff behavior and repository settings.
+
+## 1.18
+
+- Added a GitHub account picker to the Actions repository editor. Each watched repository stores its own explicit account choice, including when an existing watch is edited, and restores it after app relaunches and Mac restarts. Older watches ask for a choice rather than silently adopting the globally active account.
+- Added a + connection flow with a secure personal access token field. SOURCR verifies the token against GitHub before storing it under its own Keychain service; only the verified account name is saved in app preferences. The same flow can replace an expired credential for that account.
+- Existing GitHub CLI account names are available in the picker. On explicit selection SOURCR reads that named account’s credential, checks that it belongs to the intended login and saves an independent copy for its own requests. Importing never logs in, switches the active account or rewrites CLI credentials.
+- Every workflow, job-detail, branch, divergence and pull-request request now uses the repository’s selected credential. Child processes receive a clean environment and a SOURCR-specific CLI configuration directory, excluding inherited tokens, host overrides and debug flags.
+- Missing credentials fail with an instruction to choose or reconnect the repository’s account. SOURCR never falls back to the global CLI account. Rebinding a repository clears its cached runs and detail and invalidates pending requests so an older account’s response cannot repopulate the view.
+- Kept account tokens out of preferences, command arguments and diagnostics. CLI credential import captures its secret output in memory; normal GitHub error text redacts the selected token before reaching the UI or app logs.
+- Added regression coverage for account binding persistence, backward-compatible watch decoding, preservation during remote migration, subprocess isolation and missing-account failures. Existing Diff operations remain read-only and account connections do not modify Git settings or other projects.
+- Advanced app version and build to 1.18. Updated setup documentation with account selection, token permissions, credential replacement and the distinction between SOURCR’s account choice and the browser’s separate login for external links.
+
+
 
 ## 1.17
 
