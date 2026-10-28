@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.20
+
+- Added a Remove action to the context menu of every Actions workflow row. Right-click a failed, running, or expanded completed run to exclude that individual GitHub run from the local SOURCR board immediately.
+- Removed runs no longer contribute to branch status or the repository's running and failed badges. An abandoned failure can be dismissed so main reflects the remaining workflows rather than carrying a stale failure indefinitely.
+- Persisted exclusions in local app preferences, using the normalized GitHub owner/repository and run database ID. Refreshes, app relaunches, Mac restarts, and removing then re-adding a watched repository retain the decision independently of the watch's UUID.
+- Kept exclusions specific to one GitHub run, including subsequent attempts of that same run ID. New runs of the workflow remain eligible for display and health calculation; removing a failure does not disable monitoring for future failures.
+- Applied exclusions after choosing each workflow's board representatives. Removing the latest completed failure does not promote an older historical failure into its place, and removing one active run leaves other active runs visible.
+- Removing the currently selected run closes its detail pane, cancels the outstanding job-detail request, and invalidates its response. Polling retains the original read-only snapshot while applying exclusions whenever the board is calculated.
+- Added regression coverage for historical failure resurrection, remaining successful workflows, idle state when all results are excluded, independent active runs, future failures, repository isolation, and persistence across preference reload and replacement watch identities.
+- Added installed-app diagnostics recording removed run IDs, their exclusion from visible rows, and remaining failed/running branch counts. Advanced the version and build to 1.20; GitHub run history and all existing read-only Git operations remain unchanged.
+
 ## 1.19
 
 - Fixed the Actions board hiding an active rerun behind a newer-created successful run of the same workflow. The repository and branch could previously show green even while the polled GitHub response already contained running work.

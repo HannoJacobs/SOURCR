@@ -345,6 +345,10 @@ private struct RunLine: View {
         }
         .padding(.leading, 22)
         .padding(.trailing, 4)
+        .contextMenu {
+            Button("Remove") { appState.removeActionRun(run) }
+                .help("Permanently ignore this run in SOURCR and its health indicators")
+        }
     }
 
     private var durationColor: Color {

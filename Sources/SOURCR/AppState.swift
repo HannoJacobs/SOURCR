@@ -195,6 +195,7 @@ final class AppState {
     }
 
     var actionsSnapshots: [UUID: RepoActionsSnapshot] = [:]
+    private var actionRunExclusions = ActionRunExclusions()
     var selectedActionRunID: String?
     var selectedActionDetail: ActionRunDetail?
     var isLoadingActionDetail = false
@@ -920,6 +921,11 @@ final class AppState {
                 "actions account=\(repo.githubAccount ?? "unassigned") repo=\(repo.actionsTitle) remote=\(remote.slug) branchesURL=\(remote.branchesURL) source=github localCheckoutRequired=false runs=\(runs.count) running=\(runs.filter(\.isRunning).count) branches=\(branches.count)"
             )
             let activities = branchActivities(for: repo)
+            let excludedIDs = runs.filter { actionRunExclusions.contains($0, remote: remote) }.map(\.databaseId).sorted()
+            if !excludedIDs.isEmpty {
+                AppDiagnostics.debug(.appState,
+                    "actions exclusions remote=\(remote.slug) excludedRunIDs=\(excludedIDs) visibleExcludedRuns=\(activities.flatMap(\.runs).filter { excludedIDs.contains($0.databaseId) }.count) failedBranches=\(activities.filter { $0.state == .failed }.count)")
+            }
             let visibleActive = activities.flatMap(\.runningRuns)
             if !visibleActive.isEmpty {
                 AppDiagnostics.debug(.appState,
@@ -953,7 +959,21 @@ final class AppState {
     /// Branch rows for a repo, already filtered by the activity window and sorted.
     func branchActivities(for repo: WatchedRepo, now: Date = Date()) -> [BranchActivity] {
         let snap = actionsSnapshots[repo.id] ?? .empty
-        return snap.branchActivities(repoID: repo.id, window: branchActivityWindow, now: now)
+        let remote = repo.githubRemote ?? snap.remote
+        let excludedIDs = Set(snap.runs.filter { run in
+            remote.map { actionRunExclusions.contains(run, remote: $0) } ?? false
+        }.map(\.databaseId))
+        return snap.branchActivities(repoID: repo.id, window: branchActivityWindow, now: now, excludedRunIDs: excludedIDs)
+    }
+
+    func removeActionRun(_ run: ActionRun) {
+        guard let repo = actionsRepos.first(where: { $0.id == run.repoID }),
+              let remote = repo.githubRemote ?? actionsSnapshots[repo.id]?.remote else { return }
+        actionRunExclusions.remove(run, remote: remote)
+        if selectedActionRunID == run.id { clearActionSelection() }
+        let activities = branchActivities(for: repo)
+        AppDiagnostics.info(.appState,
+            "actions run removed remote=\(remote.slug) runID=\(run.databaseId) excluded=true visible=false failedBranches=\(activities.filter { $0.state == .failed }.count) runningBranches=\(activities.filter { $0.state == .running }.count)")
     }
 
     func openPullRequest(_ pr: BranchPullRequest) {

@@ -576,9 +576,10 @@ struct RepoActionsSnapshot: Hashable {
 
     /// Branch rows for the panel, filtered by the activity window and sorted
     /// running → failed → clean, then most recently touched.
-    func branchActivities(repoID: UUID, window: BranchActivityWindow, now: Date) -> [BranchActivity] {
+    func branchActivities(repoID: UUID, window: BranchActivityWindow, now: Date, excludedRunIDs: Set<Int> = []) -> [BranchActivity] {
         var runsByBranch: [String: [ActionRun]] = [:]
-        for run in boardRuns {
+        // Select representatives first: removing one must not resurrect older failures.
+        for run in boardRuns where !excludedRunIDs.contains(run.databaseId) {
             runsByBranch[run.headBranch, default: []].append(run)
         }
 

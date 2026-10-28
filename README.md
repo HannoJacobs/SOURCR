@@ -22,6 +22,7 @@ Menu bar icon
 - Add an Actions repository with its GitHub URL, SSH origin, or `owner/repo` in Actions Settings; the header’s Add button opens that form
 - Existing Actions folder watches convert to saved GitHub links once; if a folder was already removed, use its pencil button in Actions Settings to set the link
 - Click a workflow run to expand job/step detail to the left (same leftward expand as Diff); click again to collapse
+- Right-click any workflow run and choose **Remove** to permanently ignore that run in SOURCR. It disappears from the board and branch/repository health indicators, including after refresh or relaunch. GitHub history stays intact; new runs of that workflow still appear. Exclusions apply to the GitHub repository and run ID (including reruns of that ID), and survive removing and re-adding the repository. If every result is excluded, the branch is idle rather than reported as passing.
 - Actions repository headings use the GitHub repository name; a separate link button on each heading opens GitHub's **All branches** page
 - Mode-specific Settings manage which repos belong to Diff vs Actions
 - Defaults to Side By Side + Wrap; both live in Diff Settings

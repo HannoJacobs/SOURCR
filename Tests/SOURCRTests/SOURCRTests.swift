@@ -358,6 +358,54 @@ struct BranchBoardTests {
         )
     }
 
+    @Test func removingLatestFailureDoesNotResurrectOlderFailures() {
+        let older = run("Tests", branch: "main", status: "completed", conclusion: "failure", ageSeconds: 900, databaseId: 1)
+        let removed = run("Tests", branch: "main", status: "completed", conclusion: "failure", ageSeconds: 600, databaseId: 2)
+        let passed = run("Deploy", branch: "main", status: "completed", conclusion: "success", ageSeconds: 300, databaseId: 3)
+        let snap = snapshot(branches: [branch("main", ageSeconds: 300, isDefault: true)], runs: [older, removed, passed])
+        #expect(snap.branchActivities(repoID: repoID, window: .all, now: now)[0].state == .failed)
+        let rows = snap.branchActivities(repoID: repoID, window: .all, now: now, excludedRunIDs: [2])
+        #expect(rows[0].state == .clean)
+        #expect(rows[0].runs.map(\.databaseId) == [3])
+        #expect(rows.filter { $0.state == .failed }.isEmpty)
+
+        let future = run("Tests", branch: "main", status: "completed", conclusion: "failure", ageSeconds: 60, databaseId: 4)
+        let refreshed = snapshot(branches: snap.branches, runs: snap.runs + [future])
+        #expect(refreshed.branchActivities(repoID: repoID, window: .all, now: now, excludedRunIDs: [2])[0].state == .failed)
+    }
+
+    @Test func removingActiveAndOnlyRunsLeavesNoFalseHealthSignal() {
+        let removed = run("Tests", branch: "main", status: "in_progress", conclusion: nil, ageSeconds: 600, databaseId: 2)
+        let older = run("Tests", branch: "main", status: "completed", conclusion: "failure", ageSeconds: 900, databaseId: 1)
+        let snap = snapshot(branches: [branch("main", ageSeconds: 300)], runs: [older, removed])
+        let row = snap.branchActivities(repoID: repoID, window: .all, now: now, excludedRunIDs: [2])[0]
+        #expect(row.runs.isEmpty)
+        #expect(row.state == .idle)
+        #expect(row.attentionRuns.isEmpty)
+
+        let otherActive = run("Tests", branch: "main", status: "queued", conclusion: nil, ageSeconds: 60, databaseId: 3)
+        let refreshed = snapshot(branches: snap.branches, runs: snap.runs + [otherActive])
+        #expect(refreshed.branchActivities(repoID: repoID, window: .all, now: now, excludedRunIDs: [2])[0].runs.map(\.databaseId) == [3])
+    }
+
+    @Test func exclusionsPersistAcrossRelaunchAndWatchReplacementAndStayRepoScoped() throws {
+        let suite = "sourcr-exclusions-test-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let remote = GitHubRemote(owner: "Owner", name: "Repo")
+        let removed = run("Tests", branch: "main", status: "completed", conclusion: "failure", ageSeconds: 60, databaseId: 1)
+        var store = ActionRunExclusions(defaults: defaults)
+        store.remove(removed, remote: remote, defaults: defaults)
+        let restored = ActionRunExclusions(defaults: defaults)
+        #expect(restored.contains(removed, remote: remote))
+        var replacementWatchRun = removed
+        replacementWatchRun = ActionRun(databaseId: removed.databaseId, repoID: UUID(), workflowName: removed.workflowName, displayTitle: removed.displayTitle, headBranch: removed.headBranch, event: removed.event, status: removed.status, conclusion: removed.conclusion, createdAt: removed.createdAt, startedAt: removed.startedAt, updatedAt: removed.updatedAt, url: removed.url, attempt: 2)
+        #expect(restored.contains(replacementWatchRun, remote: GitHubRemote(owner: "owner", name: "repo")))
+        #expect(!restored.contains(removed, remote: GitHubRemote(owner: "Other", name: "Repo")))
+        let future = run("Tests", branch: "main", status: "completed", conclusion: "failure", ageSeconds: 30, databaseId: 2)
+        #expect(!restored.contains(future, remote: remote))
+    }
+
     @Test func hidesBranchesWithNoActivityInsideTheWindow() {
         let snap = snapshot(
             branches: [
