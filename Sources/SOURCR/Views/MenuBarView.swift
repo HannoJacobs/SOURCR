@@ -32,11 +32,17 @@ struct MenuBarView: View {
 
     @ViewBuilder
     private var leftDetailPane: some View {
-        switch appState.panelMode {
-        case .diff:
-            DiffPane()
-        case .actions:
-            ActionsDetailPane()
+        if let url = appState.browserURL {
+            GitHubBrowserPane(url: url, title: appState.browserTitle, requestID: appState.browserRequestID)
+        } else {
+            switch appState.panelMode {
+            case .branches:
+                EmptyView()
+            case .diff:
+                DiffPane()
+            case .actions:
+                ActionsDetailPane()
+            }
         }
     }
 
@@ -49,6 +55,8 @@ struct MenuBarView: View {
                 headerBar
                 Divider()
                 switch appState.panelMode {
+                case .branches:
+                    BranchesSCMView()
                 case .diff:
                     VSCodeSCMView()
                 case .actions:
@@ -85,10 +93,10 @@ struct MenuBarView: View {
                 HeaderIconButton(systemName: "gearshape", help: "Diff Settings") {
                     showingSettings = true
                 }
-            case .actions:
+            case .actions, .branches:
                 HeaderIconButton(
                     systemName: "arrow.clockwise",
-                    help: "Refresh Actions",
+                    help: "Refresh \(appState.panelMode.title)",
                     spinning: appState.isRefreshingActions
                 ) {
                     appState.refreshActions(forceBranches: true)
@@ -96,7 +104,7 @@ struct MenuBarView: View {
                 HeaderIconButton(systemName: "plus", help: "Add GitHub Repository") {
                     showingSettings = true
                 }
-                HeaderIconButton(systemName: "gearshape", help: "Actions Settings") {
+                HeaderIconButton(systemName: "gearshape", help: "\(appState.panelMode.title) Settings") {
                     showingSettings = true
                 }
             }
@@ -269,8 +277,8 @@ struct PanelModeToggle: View {
                         appState.setPanelMode(mode)
                     }
                 } label: {
-                    Text(mode.title)
-                        .font(.system(size: 11, weight: .semibold))
+                    Image(systemName: mode.symbolName)
+                        .font(.system(size: 12, weight: .semibold))
                         .lineLimit(1)
                         .fixedSize()
                         .padding(.horizontal, 9)
@@ -280,6 +288,9 @@ struct PanelModeToggle: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .help(mode.title)
+                .accessibilityLabel(mode.title)
+                .accessibilityAddTraits(appState.panelMode == mode ? .isSelected : [])
             }
         }
         .padding(2)

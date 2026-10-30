@@ -7,7 +7,7 @@ Menu bar icon
     └─ Anchored panel (right edge pinned to the status item)
          ├─ Diff pane (left, expands only when a file is selected)
          └─ SCM column (right, fixed width)
-              ├─ Header: Diff | Actions · Pin · Detach · Refresh · Add · Settings
+              ├─ Header: Branches | Actions | Diff (icons) · Pin · Detach · Refresh · Add · Settings
               ├─ Multi-repo accordion (drag grip to reorder)
               └─ Flat changes + untracked list (no footer; Quit lives in Settings)
 ```
@@ -15,7 +15,9 @@ Menu bar icon
 ## What it does
 
 - Lives in the menu bar (`LSUIElement`)
-- Watch local git repositories for **Diff** and GitHub repositories for **Actions** (independent lists)
+- Watch local git repositories for **Diff** and GitHub repositories for **Branches and Actions** (shared GitHub list; separate from Diff)
+- **Branches mode:** Pins the default branch first, then shows remote branches newest-commit first, ten per repository; **Show more** adds ten. Each row links its branch and PR in an attached browser and shows last commit time, current-head checks, and behind/ahead counts against the default branch. Right-click **Hide until updated** to hide that commit locally; a changed branch head brings it back, including after relaunch.
+- The mode selector uses icons in **Branches → Actions → Diff** order, with tooltips and accessible labels.
 - **Diff mode:** Shows combined staged + dirty changes and untracked files on the **current branch**
 - Click a file to open a diff to the left (Inline or Side By Side); click again to collapse
 - **Actions mode:** Shows active remote branches, divergence, pull requests, and all active runs per branch/workflow, falling back to the latest completed attempt; GitHub links work without any local checkout
@@ -24,7 +26,7 @@ Menu bar icon
 - Click a workflow run to expand job/step detail to the left (same leftward expand as Diff); click again to collapse
 - Right-click any workflow run and choose **Remove** to permanently ignore that run in SOURCR. It disappears from the board and branch/repository health indicators, including after refresh or relaunch. GitHub history stays intact; new runs of that workflow still appear. Exclusions apply to the GitHub repository and run ID (including reruns of that ID), and survive removing and re-adding the repository. If every result is excluded, the branch is idle rather than reported as passing.
 - Actions repository headings use the GitHub repository name; a separate link button on each heading opens GitHub's **All branches** page
-- Mode-specific Settings manage which repos belong to Diff vs Actions
+- Settings manage local Diff repositories separately from the shared Branches/Actions GitHub list
 - Defaults to Side By Side + Wrap; both live in Diff Settings
 - Follows system light / dark appearance
 - Opening the panel (or bringing it to the foreground) immediately refreshes Diff and Actions
@@ -99,6 +101,7 @@ Launch evidence is written to:
 | `DiffParser` | Unified + side-by-side rendering model |
 | `VSCodeSCMView` | Right-column multi-repo SCM + drag reorder |
 | `ActionsSCMView` | Right-column Actions list (active runs or latest completed attempt per workflow) |
+| `BranchesSCMView` / `GitHubBrowserPane` | Branch overview and attached GitHub website browser |
 | `DiffPane` / `ActionsDetailPane` | Left-expand detail for file diffs or workflow steps |
 | `SettingsPanel` | Viewer controls (right column overlay) |
 
@@ -130,3 +133,5 @@ process environment. SOURCR never runs `gh auth login`, `gh auth switch`,
 `gh auth setup-git` or configuration writes. Adding an account does not register
 it with the CLI. Missing or rejected credentials produce an error and never fall
 back to another account. External GitHub links still use the browser's own login.
+
+The attached browser uses its own persistent website session. Private GitHub pages require signing in there; API credentials are never inserted into web requests.

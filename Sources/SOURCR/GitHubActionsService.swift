@@ -154,19 +154,11 @@ enum GitHubActionsService {
 
     // MARK: - Branches
 
-    /// Branch heads are paged in full (repos here run to 129 branches, and GitHub's
-    /// `TAG_COMMIT_DATE` ref ordering does not actually order branch heads by commit
-    /// date — verified against a live repo — so nothing may be trusted to come first).
-    private static let branchPageSize = 100
-    private static let maxBranchPages = 5
+    /// Fetch every remote head: GitHub's branch-ref ordering cannot be trusted to
+    /// return newest commits first, and Show more must reach older branches too.
+    private static let divergenceBatchSize = 30
 
-    /// Divergence is resolved only for the most recently committed branches: the ones
-    /// any activity window can realistically surface. Comparing all 129 branches cost
-    /// ~4.4s per page against ~1.9s without, for numbers nothing would ever draw.
-    private static let divergenceBranchLimit = 30
-
-    /// Every branch head with its last commit, open PR, and (for the recent ones)
-    /// divergence from the default branch.
+    /// Every branch head with its last commit, checks, PR and default-branch divergence.
     static func loadBranches(
         remote: GitHubRemote,
         defaultBranchHint: String?,
@@ -178,19 +170,18 @@ enum GitHubActionsService {
         // Self-heals if the default branch changed since the cached hint.
         let base = heads.defaultBranch ?? defaultBranchHint ?? "main"
 
-        let recent = heads.heads
-            .sorted { $0.lastCommitAt > $1.lastCommitAt }
-            .prefix(divergenceBranchLimit)
-            .map(\.name)
-
-        let divergence = recent.isEmpty
-            ? [:]
-            : try await loadDivergence(remote: remote, branches: Array(recent), credential: credential)
+        let names = heads.heads.map(\.name)
+        var divergence: [String: BranchDivergence] = [:]
+        for start in stride(from: 0, to: names.count, by: divergenceBatchSize) {
+            let batch = Array(names[start..<min(start + divergenceBatchSize, names.count)])
+            let values = try await loadDivergence(remote: remote, branches: batch, credential: credential)
+            divergence.merge(values) { _, new in new }
+        }
 
         // Non-fatal: a PR hiccup must not blank out divergence and the branch list too.
         var pullRequests: [String: BranchPullRequest] = [:]
         do {
-            pullRequests = try await loadPullRequestsByHeadBranch(remote: remote, credential: credential)
+            pullRequests = try await loadPullRequestsByHeadBranch(remote: remote, branches: names, credential: credential)
         } catch is CancellationError {
             throw CancellationError()
         } catch {
@@ -211,7 +202,9 @@ enum GitHubActionsService {
                 behind: d?.behind ?? 0,
                 isDefault: head.name == base,
                 pullRequest: pullRequests[head.name],
-                hasDivergence: d != nil
+                hasDivergence: d != nil,
+                headOID: head.oid,
+                checkState: head.checkState
             )
         }
 
@@ -221,6 +214,8 @@ enum GitHubActionsService {
     private struct BranchHead {
         let name: String
         let lastCommitAt: Date
+        let oid: String
+        let checkState: BranchCheckState?
     }
 
     private static func loadBranchHeads(
@@ -230,7 +225,7 @@ enum GitHubActionsService {
         var defaultBranch: String?
         var cursor: String?
 
-        for _ in 0..<maxBranchPages {
+        while true {
             try Task.checkCancellation()
 
             var arguments = [
@@ -259,11 +254,18 @@ enum GitHubActionsService {
                 guard let node,
                       let committed = parseDateIfPresent(node.target?.committedDate)
                 else { continue }
-                heads.append(BranchHead(name: node.name, lastCommitAt: committed))
+                heads.append(BranchHead(
+                    name: node.name, lastCommitAt: committed,
+                    oid: node.target?.oid ?? "",
+                    checkState: BranchCheckState.fromRollup(node.target?.statusCheckRollup?.state)
+                ))
             }
 
             guard let page = repository.refs?.pageInfo, page.hasNextPage == true, let next = page.endCursor else {
                 break
+            }
+            guard next != cursor else {
+                throw GitHubActionsError.invalidJSON("Branch pagination did not advance")
             }
             cursor = next
         }
@@ -271,50 +273,44 @@ enum GitHubActionsService {
         return (heads, defaultBranch)
     }
 
-    /// Most recent pull request per head branch, in any state.
-    ///
-    /// Deliberately NOT `Ref.associatedPullRequests`: that association is computed and
-    /// lags badly for freshly opened PRs — verified against a live repo where two PRs
-    /// merged minutes earlier reported `totalCount: 0` on their own branch refs while
-    /// older PRs resolved fine. Querying the repository's pull requests directly and
-    /// mapping by `headRefName` is what GitHub's own Branches page shows.
-    ///
-    /// All states, because a merged or closed PR is still the answer to "what happened to
-    /// this branch?". Ordered by most recently updated, so the first hit per branch is the
-    /// current one and 100 comfortably covers any branch recent enough to be displayed.
+    /// Resolve the newest PR for each existing head explicitly, so expanding an old
+    /// branch does not lose its PR merely because a repository has newer PR history.
     static func loadPullRequestsByHeadBranch(
-        remote: GitHubRemote, credential: GitHubCredential
+        remote: GitHubRemote, branches: [String], credential: GitHubCredential
     ) async throws -> [String: BranchPullRequest] {
-        try Task.checkCancellation()
-
-        let json = try await runGH([
-            "api", "graphql",
-            "-f", "query=\(pullRequestsQuery)",
-            "-f", "owner=\(remote.owner)",
-            "-f", "name=\(remote.name)"
-        ], credential: credential)
-
-        guard let data = json.data(using: .utf8) else {
-            throw GitHubActionsError.invalidJSON("Empty pull request list")
-        }
-
-        let decoded = try JSONDecoder().decode(GHPullRequestsResponse.self, from: data)
-        let nodes = decoded.data?.repository?.pullRequests?.nodes ?? []
-
         var result: [String: BranchPullRequest] = [:]
-        for node in nodes {
-            guard let node, let head = node.headRefName, !head.isEmpty else { continue }
-            // Newest-updated first, so never overwrite an earlier (more recent) hit.
-            guard result[head] == nil else { continue }
-            result[head] = BranchPullRequest(
-                number: node.number,
-                title: node.title ?? "",
-                url: node.url ?? "",
-                state: PullRequestState.from(
-                    rawState: node.state ?? "OPEN",
-                    isDraft: node.isDraft ?? false
+        for start in stride(from: 0, to: branches.count, by: divergenceBatchSize) {
+            try Task.checkCancellation()
+            let batch = Array(branches[start..<min(start + divergenceBatchSize, branches.count)])
+            let fields = batch.enumerated().map { index, name in
+                "b\(index): pullRequests(headRefName:\"\(escapeGraphQLString(name))\",states:[OPEN,CLOSED,MERGED],first:1,orderBy:{field:UPDATED_AT,direction:DESC}){ nodes{ number title url isDraft state headRefName } }"
+            }.joined(separator: "\n")
+            let query = """
+            query($owner:String!,$name:String!){
+              repository(owner:$owner,name:$name){
+            \(fields)
+              }
+            }
+            """
+            let json = try await runGH([
+                "api", "graphql", "-f", "query=\(query)",
+                "-f", "owner=\(remote.owner)", "-f", "name=\(remote.name)"
+            ], credential: credential)
+            guard let data = json.data(using: .utf8) else {
+                throw GitHubActionsError.invalidJSON("Empty pull request list")
+            }
+            let decoded = try JSONDecoder().decode(GHPullRequestsResponse.self, from: data)
+            guard let repository = decoded.data?.repository else {
+                throw GitHubActionsError.invalidJSON("No repository in pull request response")
+            }
+            for (index, name) in batch.enumerated() {
+                guard let connection = repository["b\(index)"] ?? nil,
+                      let node = connection.nodes?.compactMap({ $0 }).first else { continue }
+                result[name] = BranchPullRequest(
+                    number: node.number, title: node.title ?? "", url: node.url ?? "",
+                    state: PullRequestState.from(rawState: node.state ?? "OPEN", isDraft: node.isDraft ?? false)
                 )
-            )
+            }
         }
         return result
     }
@@ -388,18 +384,8 @@ enum GitHubActionsService {
           pageInfo{ hasNextPage endCursor }
           nodes{
             name
-            target{ ... on Commit { committedDate } }
+            target{ ... on Commit { oid committedDate statusCheckRollup{ state } } }
           }
-        }
-      }
-    }
-    """
-
-    private static let pullRequestsQuery = """
-    query($owner:String!,$name:String!){
-      repository(owner:$owner,name:$name){
-        pullRequests(states:[OPEN,CLOSED,MERGED],first:100,orderBy:{field:UPDATED_AT,direction:DESC}){
-          nodes{ number title url isDraft state headRefName }
         }
       }
     }
@@ -635,6 +621,12 @@ private struct GHBranchHeadsResponse: Decodable {
 
     struct Target: Decodable {
         let committedDate: String?
+        let oid: String?
+        let statusCheckRollup: Rollup?
+    }
+
+    struct Rollup: Decodable {
+        let state: String?
     }
 }
 
@@ -642,11 +634,7 @@ private struct GHPullRequestsResponse: Decodable {
     let data: DataBlock?
 
     struct DataBlock: Decodable {
-        let repository: Repository?
-    }
-
-    struct Repository: Decodable {
-        let pullRequests: PRConnection?
+        let repository: [String: PRConnection?]?
     }
 
     struct PRConnection: Decodable {

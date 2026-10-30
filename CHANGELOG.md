@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.21
+
+- Added a dedicated Branches view alongside Actions and Diff so remote branch inventory can be checked across the watched GitHub repositories without leaving SOURCR. Branches and Actions use the same saved repository and account bindings.
+- Replaced the mode selector words with branch, play-circle, and document icons, ordered Branches, Actions, Diff from left to right. Each icon retains a hover tooltip and an accessible name.
+- The default branch is pinned first; remaining branches are sorted by latest commit date, with a stable name tie-breaker. Each repository initially shows ten visible branches; Show more reveals the next ten without applying the Actions activity-window filter.
+- Each compact branch row shows the branch name, relative last-commit time, current-head check status, behind/ahead counts against the repository default branch, and the latest associated pull request when one exists.
+- Added Hide until updated to the branch context menu. The local exclusion stores the observed commit ID against the GitHub repository and branch name, persists across relaunches, and stops hiding the branch as soon as its head changes. No remote branch is deleted or modified.
+- Branch-name and pull-request clicks now open GitHub in an attached website browser pane with back, forward, reload, and close controls. Website sign-in is independent of SOURCR's API Keychain credentials; those credentials are never passed to the browser.
+- Branch metadata now includes the exact head commit ID and GitHub check rollup. The branch listing follows all remote pages, resolves divergence in bounded batches, and looks up pull requests by branch so expanded older rows retain useful metadata.
+- Added focused tests for hidden-head persistence, repository isolation, changed-head reappearance even with an older commit timestamp, and check-rollup mapping. Existing Diff and Actions regression checks remain part of the release test suite.
+
 ## 1.20
 
 - Added a Remove action to the context menu of every Actions workflow row. Right-click a failed, running, or expanded completed run to exclude that individual GitHub run from the local SOURCR board immediately.

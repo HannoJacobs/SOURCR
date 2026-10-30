@@ -24,7 +24,7 @@ struct SettingsPanel: View {
                 HStack(spacing: 8) {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 12, weight: .semibold))
-                    Text(mode == .diff ? "Diff Settings" : "Actions Settings")
+                    Text("\(mode.title) Settings")
                         .font(.headline)
                     Spacer()
                 }
@@ -44,20 +44,20 @@ struct SettingsPanel: View {
                             ForEach(repos) { repo in
                                 HStack(alignment: .top, spacing: 8) {
                                     VStack(alignment: .leading, spacing: 2) {
-                                        Text(mode == .actions ? repo.actionsTitle : repo.displayName)
+                                        Text(mode != .diff ? repo.actionsTitle : repo.displayName)
                                             .font(.system(size: 12, weight: .semibold))
-                                        if mode == .actions {
+                                        if mode != .diff {
                                             Text(repo.githubAccount.map { "GitHub: \($0)" } ?? "Choose a GitHub account")
                                                 .font(.caption)
                                                 .foregroundStyle(repo.githubAccount == nil ? Color.orange : Color.secondary)
                                         }
-                                        Text(mode == .actions ? (repo.githubRemote?.slug ?? "GitHub link needed") : repo.path)
+                                        Text(mode != .diff ? (repo.githubRemote?.slug ?? "GitHub link needed") : repo.path)
                                             .font(.system(size: 10, design: .monospaced))
                                             .foregroundStyle(.secondary)
                                             .lineLimit(2)
                                     }
                                     Spacer(minLength: 8)
-                                    if mode == .actions {
+                                    if mode != .diff {
                                         Button {
                                             editingActionRepoID = repo.id
                                             actionReference = repo.githubRemote?.webURL ?? ""
@@ -83,7 +83,7 @@ struct SettingsPanel: View {
                             }
                         }
 
-                        if mode == .actions {
+                        if mode != .diff {
                             TextField("GitHub URL or owner/repo", text: $actionReference)
                                 .textFieldStyle(.roundedBorder)
                                 .disabled(isSavingRepository || isSavingAccount)
@@ -126,14 +126,14 @@ struct SettingsPanel: View {
                             }
                         }
                     } header: {
-                        Text(mode == .diff ? "Diff Repositories" : "Actions Repositories")
+                        Text(mode == .diff ? "Diff Repositories" : "GitHub Repositories")
                     } footer: {
                         Text(mode == .diff
-                             ? "These repos appear only in Diff. Actions has its own list."
-                             : "Watch GitHub directly. Paste a repository URL or owner/repo; no local folder is needed.")
+                             ? "These repos appear only in Diff. Branches and Actions share a separate list."
+                             : "Shared by Branches and Actions. Paste a repository URL or owner/repo; no local folder is needed.")
                     }
 
-                    if mode == .actions {
+                    if mode != .diff {
                         if showingAccountForm {
                             Section("Connect GitHub Account") {
                                 SecureField("Personal access token", text: $newToken)
@@ -167,6 +167,7 @@ struct SettingsPanel: View {
                                 }
                             }
                         }
+                        if mode == .actions {
                         Section {
                             LabeledContent("Show branches") {
                                 BranchWindowPicker()
@@ -175,6 +176,7 @@ struct SettingsPanel: View {
                             Text("Board")
                         } footer: {
                             Text("Branches with no commits or runs inside this window are hidden — the board stays about what you are actually working on.")
+                        }
                         }
                     }
 

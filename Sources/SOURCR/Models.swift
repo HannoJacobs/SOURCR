@@ -166,8 +166,9 @@ struct SideBySideRow: Identifiable, Hashable {
 // MARK: - Actions (GitHub)
 
 enum PanelMode: String, CaseIterable, Identifiable {
-    case diff
+    case branches
     case actions
+    case diff
 
     var id: String { rawValue }
 
@@ -175,6 +176,15 @@ enum PanelMode: String, CaseIterable, Identifiable {
         switch self {
         case .diff: return "Diff"
         case .actions: return "Actions"
+        case .branches: return "Branches"
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .branches: return "arrow.triangle.branch"
+        case .actions: return "play.circle"
+        case .diff: return "doc.text.magnifyingglass"
         }
     }
 }
@@ -434,7 +444,7 @@ struct BranchPullRequest: Hashable {
     let state: PullRequestState
 }
 
-/// Remote branch metadata: divergence from the default branch, last commit, open PR.
+/// Remote branch metadata for the current head commit and its most recent PR.
 struct BranchInfo: Hashable {
     let name: String
     let lastCommitAt: Date
@@ -444,20 +454,45 @@ struct BranchInfo: Hashable {
     let behind: Int
     let isDefault: Bool
     let pullRequest: BranchPullRequest?
-    /// False when `ahead`/`behind` could not be resolved — an old branch outside the
-    /// divergence window, or a row derived from workflow runs after the branch query
-    /// failed. Divergence is then *unknown*, not zero, and must not be drawn as a value.
+    /// Unknown comparisons must not be drawn as zero.
     let hasDivergence: Bool
+    /// Identity of the current head, used to revive a hidden branch after a push.
+    let headOID: String
+    /// Check rollup attached to this exact head, independent of the recent-run list.
+    let checkState: BranchCheckState?
+
+    init(name: String, lastCommitAt: Date, ahead: Int, behind: Int, isDefault: Bool,
+         pullRequest: BranchPullRequest?, hasDivergence: Bool,
+         headOID: String = "", checkState: BranchCheckState? = nil) {
+        self.name = name
+        self.lastCommitAt = lastCommitAt
+        self.ahead = ahead
+        self.behind = behind
+        self.isDefault = isDefault
+        self.pullRequest = pullRequest
+        self.hasDivergence = hasDivergence
+        self.headOID = headOID
+        self.checkState = checkState
+    }
 }
 
 /// Collapsed check state for a branch — the only four states worth a glance.
-enum BranchCheckState {
+enum BranchCheckState: Hashable {
     case running
     case failed
     /// Every workflow that ran most recently on this branch passed.
     case clean
     /// Nothing has run on this branch (or only cancelled/skipped runs).
     case idle
+
+    static func fromRollup(_ state: String?) -> BranchCheckState? {
+        switch state?.uppercased() {
+        case "SUCCESS": return .clean
+        case "ERROR", "FAILURE": return .failed
+        case "EXPECTED", "PENDING": return .running
+        default: return nil
+        }
+    }
 }
 
 /// How far back a branch counts as "something I'm working on".

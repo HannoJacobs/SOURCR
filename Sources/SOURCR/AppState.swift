@@ -125,10 +125,15 @@ final class AppState {
         didSet { persistCollapsedRepos(actionsCollapsedRepoIDs, key: Self.actionsCollapsedKey) }
     }
 
+    var branchesCollapsedRepoIDs: Set<UUID> = [] {
+        didSet { persistCollapsedRepos(branchesCollapsedRepoIDs, key: "sourcr.branchesCollapsedRepos") }
+    }
+
     func isRepoAccordionOpen(_ repoID: UUID, in mode: PanelMode) -> Bool {
         switch mode {
         case .diff: return !diffCollapsedRepoIDs.contains(repoID)
         case .actions: return !actionsCollapsedRepoIDs.contains(repoID)
+        case .branches: return !branchesCollapsedRepoIDs.contains(repoID)
         }
     }
 
@@ -137,6 +142,9 @@ final class AppState {
         case .diff:
             if open { diffCollapsedRepoIDs.remove(repoID) }
             else { diffCollapsedRepoIDs.insert(repoID) }
+        case .branches:
+            if open { branchesCollapsedRepoIDs.remove(repoID) }
+            else { branchesCollapsedRepoIDs.insert(repoID) }
         case .actions:
             if open { actionsCollapsedRepoIDs.remove(repoID) }
             else { actionsCollapsedRepoIDs.insert(repoID) }
@@ -167,7 +175,7 @@ final class AppState {
     var activeRepos: [WatchedRepo] {
         switch panelMode {
         case .diff: return diffRepos
-        case .actions: return actionsRepos
+        case .actions, .branches: return actionsRepos
         }
     }
 
@@ -185,6 +193,7 @@ final class AppState {
             UserDefaults.standard.set(panelMode.rawValue, forKey: Self.panelModeKey)
             // Pure UI flip — keep any in-flight Actions list poll (pinned Diff can
             // still watch a long CD). Drop only the detail payload for the other mode.
+            browserURL = nil
             collapseDetailIfNeeded()
             clearDiffPayload()
             clearActionPayload()
@@ -195,6 +204,11 @@ final class AppState {
     }
 
     var actionsSnapshots: [UUID: RepoActionsSnapshot] = [:]
+    var branchExclusions = BranchExclusions()
+    var browserRequestID = UUID()
+    var browserURL: URL?
+    var browserTitle = "GitHub"
+
     private var actionRunExclusions = ActionRunExclusions()
     var selectedActionRunID: String?
     var selectedActionDetail: ActionRunDetail?
@@ -248,14 +262,14 @@ final class AppState {
     func repos(for mode: PanelMode) -> [WatchedRepo] {
         switch mode {
         case .diff: return diffRepos
-        case .actions: return actionsRepos
+        case .actions, .branches: return actionsRepos
         }
     }
 
     private func setRepos(_ repos: [WatchedRepo], for mode: PanelMode) {
         switch mode {
         case .diff: diffRepos = repos
-        case .actions: actionsRepos = repos
+        case .actions, .branches: actionsRepos = repos
         }
     }
 
@@ -320,6 +334,7 @@ final class AppState {
         }
         diffCollapsedRepoIDs = loadCollapsedRepos(key: Self.diffCollapsedKey)
         actionsCollapsedRepoIDs = loadCollapsedRepos(key: Self.actionsCollapsedKey)
+        branchesCollapsedRepoIDs = loadCollapsedRepos(key: "sourcr.branchesCollapsedRepos")
         pruneCollapsedRepos()
         if selectedRepoID == nil {
             selectedRepoID = activeRepos.first?.id
@@ -449,8 +464,8 @@ final class AppState {
 
     func removeRepo(_ repo: WatchedRepo, from mode: PanelMode? = nil) {
         let target = mode ?? panelMode
-        if target == .actions { cancelActionsWork() }
-        if target == .actions, selectedActionRunID?.hasPrefix("\(repo.id.uuidString):") == true {
+        if target != .diff { cancelActionsWork() }
+        if target != .diff, selectedActionRunID?.hasPrefix("\(repo.id.uuidString):") == true {
             clearActionSelection()
         }
         var list = repos(for: target)
@@ -474,7 +489,7 @@ final class AppState {
         }
         pruneCollapsedRepos()
         saveRepos()
-        if target == .actions { refreshActions() }
+        if target != .diff { refreshActions() }
     }
 
     func selectRepo(_ repo: WatchedRepo) {
@@ -485,6 +500,7 @@ final class AppState {
     func setPanelMode(_ mode: PanelMode) {
         guard mode != panelMode else { return }
         panelMode = mode
+        AppDiagnostics.info(.appState, "panel mode=\(mode.rawValue) tabs=branches,actions,diff")
         if let selectedRepoID,
            !activeRepos.contains(where: { $0.id == selectedRepoID }) {
             self.selectedRepoID = activeRepos.first?.id
@@ -533,6 +549,7 @@ final class AppState {
             return
         }
 
+        browserURL = nil
         selectedActionRunID = run.id
         isExpanded = true
         selectedActionDetail = nil
@@ -543,6 +560,8 @@ final class AppState {
     }
 
     func clearSelection() {
+        browserURL = nil
+        collapseDetailIfNeeded()
         clearDiffSelection()
         clearActionSelection()
     }
@@ -874,12 +893,22 @@ final class AppState {
             // 50 (not 20): the branch board splits runs across every active branch,
             // so a short window would drop workflows for all but the busiest branch.
             let credential = try await githubAccounts.credential(for: repo.githubAccount)
-            let runs = try await GitHubActionsService.listRuns(remote: remote, repoID: repoID, limit: 50, credential: credential)
+            var runs = previous.runs
+            var runsError: String?
+            do {
+                runs = try await GitHubActionsService.listRuns(remote: remote, repoID: repoID, limit: 50, credential: credential)
+            } catch is CancellationError {
+                return
+            } catch {
+                runsError = "Actions refresh failed: \(error.localizedDescription)"
+                AppDiagnostics.error(.appState, "actions run fetch failed repo=\(remote.slug) error=\(error.localizedDescription)")
+            }
 
             guard !Task.isCancelled, generation == actionsRefreshGeneration else { return }
 
             var branches = previous.branches
             var defaultBranch = previous.defaultBranch
+            var branchError: String?
             var branchesFetchedAt = previous.branchesFetchedAt
 
             if shouldRefreshBranches(previous: previous, force: forceBranches) {
@@ -896,6 +925,7 @@ final class AppState {
                 } catch is CancellationError {
                     return
                 } catch {
+                    branchError = "Branch refresh failed: \(error.localizedDescription)"
                     // Runs already succeeded — keep the previous branch metadata rather
                     // than blanking the board because one GraphQL call failed.
                     AppDiagnostics.error(
@@ -912,7 +942,7 @@ final class AppState {
                 runs: runs,
                 branches: branches,
                 defaultBranch: defaultBranch,
-                errorMessage: nil,
+                errorMessage: branchError ?? runsError,
                 fetchedAt: Date(),
                 branchesFetchedAt: branchesFetchedAt
             )
@@ -978,15 +1008,36 @@ final class AppState {
 
     func openPullRequest(_ pr: BranchPullRequest) {
         guard let url = URL(string: pr.url), !pr.url.isEmpty else { return }
-        NSWorkspace.shared.open(url)
+        openInBrowser(url, title: "PR #\(pr.number)")
     }
 
     func openBranchOnGitHub(_ branch: BranchInfo, in repoID: UUID) {
-        guard let slug = actionsSnapshots[repoID]?.remote?.slug else { return }
+        guard let remote = actionsRepos.first(where: { $0.id == repoID })?.githubRemote ?? actionsSnapshots[repoID]?.remote else { return }
+        let slug = remote.slug
         let encoded = branch.name
             .addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? branch.name
         guard let url = URL(string: "https://github.com/\(slug)/tree/\(encoded)") else { return }
-        NSWorkspace.shared.open(url)
+        openInBrowser(url, title: branch.name)
+    }
+
+    func openInBrowser(_ url: URL, title: String) {
+        guard url.scheme == "https", url.host == "github.com" else { return }
+        browserRequestID = UUID()
+        browserTitle = title
+        browserURL = url
+        isExpanded = true
+        AppDiagnostics.info(.appState, "attached browser opened kind=\(url.path.contains("/pull/") ? "pullRequest" : "branch")")
+    }
+
+    func isBranchHidden(_ branch: BranchInfo, in repoID: UUID) -> Bool {
+        guard let remote = actionsRepos.first(where: { $0.id == repoID })?.githubRemote else { return false }
+        return branchExclusions.contains(branch, remote: remote)
+    }
+
+    func hideBranch(_ branch: BranchInfo, in repoID: UUID) {
+        guard let remote = actionsRepos.first(where: { $0.id == repoID })?.githubRemote else { return }
+        branchExclusions.hide(branch, remote: remote)
+        AppDiagnostics.info(.appState, "branch hidden until head changes remote=\(remote.slug) hidden=\(isBranchHidden(branch, in: repoID))")
     }
 
     private func loadActionDetailAsync(for run: ActionRun) async {
