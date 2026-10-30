@@ -18,20 +18,25 @@ struct MenuBarView: View {
 
     private var mainPanel: some View {
         HStack(spacing: 0) {
-            if appState.isExpanded {
-                leftDetailPane
+            if appState.isExpanded && !appState.detailPaneOnRight {
+                detailPane
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 Divider()
             }
             rightColumn
                 .frame(width: SOURCRLayout.scmWidth)
                 .frame(maxHeight: .infinity, alignment: .top)
+            if appState.isExpanded && appState.detailPaneOnRight {
+                Divider()
+                detailPane
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     @ViewBuilder
-    private var leftDetailPane: some View {
+    private var detailPane: some View {
         switch appState.panelMode {
         case .branches:
             ActionsDetailPane()

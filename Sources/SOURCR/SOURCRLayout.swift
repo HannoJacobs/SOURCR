@@ -50,6 +50,21 @@ struct SCMBodyHeightFrame: ViewModifier {
     }
 }
 
+/// Which side of the list column the detail pane opens on: towards the larger gap
+/// on the display, so the list itself stays where it was clicked. Ties keep the
+/// historic leftward expansion.
+enum DetailPaneSide: Equatable {
+    case left
+    case right
+
+    static func resolve(columnMinX: CGFloat, columnMaxX: CGFloat, visibleFrame: CGRect?) -> DetailPaneSide {
+        guard let visibleFrame else { return .left }
+        let spaceLeft = columnMinX - visibleFrame.minX
+        let spaceRight = visibleFrame.maxX - columnMaxX
+        return spaceRight > spaceLeft ? .right : .left
+    }
+}
+
 /// Where a detached panel's fixed corner (right edge + top) may sit, given the
 /// displays that are connected *right now*.
 ///

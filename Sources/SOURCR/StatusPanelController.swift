@@ -8,15 +8,16 @@ final class SOURCRPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
-/// Menu-bar anchored panel. Right edge stays fixed; diff grows/shrinks to the left.
+/// Menu-bar anchored panel. The list column stays fixed; the detail pane opens towards
+/// whichever side of the display has more room.
 ///
 /// Two window modes:
 /// - **anchored** — hangs off the status item (optionally pinned to skip auto-dismiss)
 /// - **detached** — torn off by dragging the header; a free-floating window that
 ///   hovers above every other app and keeps its own position across hide/show.
 ///
-/// Both modes share the same geometry rule (fixed right edge + fixed top, expanding
-/// leftward), so switching between them never makes the content jump sideways.
+/// Both modes share the same geometry rule (fixed list-column right edge + fixed top),
+/// so switching between them never makes the content jump sideways.
 @MainActor
 final class StatusPanelController: NSObject, NSWindowDelegate {
     private static let detachedMaxXKey = "sourcr.panelDetachedMaxX"
@@ -51,6 +52,10 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
     /// Geometry captured at mouse-down so a drag tracks the cursor 1:1.
     private var dragStartMaxX: CGFloat?
     private var dragStartTopY: CGFloat?
+
+    /// Chosen when the detail pane opens and kept until it closes, so dragging an
+    /// expanded window never flips the pane across the list.
+    private var detailPaneSide: DetailPaneSide?
 
     init(appState: AppState) {
         self.appState = appState
@@ -154,6 +159,7 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
         panel?.orderOut(nil)
         // Detached position survives hide/show; the menu-bar anchor is re-read on open.
         clearAnchor()
+        detailPaneSide = nil
         appState.isPanelVisible = false
         AppDiagnostics.info(.lifecycle, "panel hidden")
     }
@@ -193,7 +199,7 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
     /// Header mouse-down: remember where the window's fixed corner was.
     func beginPanelDrag() {
         guard let panel else { return }
-        dragStartMaxX = panel.frame.maxX
+        dragStartMaxX = listColumnMaxX(of: panel.frame)
         dragStartTopY = panel.frame.maxY
     }
 
@@ -222,7 +228,7 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
 
         detachedMaxX = maxX
         detachedTopY = topY
-        panel.setFrameOrigin(NSPoint(x: maxX - width, y: topY - height))
+        panel.setFrameOrigin(NSPoint(x: originX(listColumnMaxX: maxX, width: width), y: topY - height))
     }
 
     func endPanelDrag() {
@@ -238,7 +244,7 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
 
     private func handleDetachChanged(_ detached: Bool) {
         if detached, detachedMaxX == nil || detachedTopY == nil, let panel {
-            detachedMaxX = panel.frame.maxX
+            detachedMaxX = listColumnMaxX(of: panel.frame)
             detachedTopY = panel.frame.maxY
         }
         if !detached {
@@ -371,7 +377,24 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
             height = min(height, max(SOURCRLayout.minPanelHeight, availableBelowTop))
         }
 
-        var origin = NSPoint(x: maxX - width, y: topY - height)
+        if appState.isExpanded {
+            if detailPaneSide == nil {
+                detailPaneSide = DetailPaneSide.resolve(
+                    columnMinX: maxX - SOURCRLayout.scmWidth,
+                    columnMaxX: maxX,
+                    visibleFrame: visible
+                )
+                AppDiagnostics.info(.lifecycle, "detail pane side=\(detailPaneSide == .right ? "right" : "left")")
+            }
+        } else {
+            detailPaneSide = nil
+        }
+        let onRight = detailPaneSide == .right
+        if appState.detailPaneOnRight != onRight {
+            appState.detailPaneOnRight = onRight
+        }
+
+        var origin = NSPoint(x: originX(listColumnMaxX: maxX, width: width), y: topY - height)
 
         if let visible {
             if origin.x + width > visible.maxX - 8 {
@@ -394,6 +417,15 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
         // contentView auto-fills the window. AppKit will redraw on its normal pass;
         // forcing display here would synchronously traverse the SwiftUI hierarchy.
         panel.setFrame(targetFrame, display: false)
+    }
+
+    /// Right edge of the list column, which is the panel's fixed reference point.
+    private func listColumnMaxX(of frame: NSRect) -> CGFloat {
+        appState.isExpanded && appState.detailPaneOnRight ? frame.minX + SOURCRLayout.scmWidth : frame.maxX
+    }
+
+    private func originX(listColumnMaxX maxX: CGFloat, width: CGFloat) -> CGFloat {
+        appState.detailPaneOnRight ? maxX - SOURCRLayout.scmWidth : maxX - width
     }
 
     private func buildPanel() {

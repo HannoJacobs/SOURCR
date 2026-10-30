@@ -81,9 +81,22 @@ private struct BranchesRepoAccordion: View {
                         .font(.system(size: 12, weight: .bold))
                         .lineLimit(1)
                     Spacer(minLength: 4)
-                    Text("\(visibleBranches.count)")
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(.secondary)
+                    let activities = appState.branchActivities(for: repo, window: .all)
+                        .filter { !appState.isBranchHidden($0.branch, in: repo.id) }
+                    let running = activities.filter { $0.state == .running }.count
+                    let failed = activities.filter { $0.state == .failed }.count
+                    if running > 0 {
+                        countBadge(running, color: .orange, help: "\(running) branch\(running == 1 ? "" : "es") running CI/CD")
+                    }
+                    if failed > 0 {
+                        countBadge(failed, color: .red, help: "\(failed) branch\(failed == 1 ? "" : "es") with failed workflows")
+                    }
+                    if running == 0, failed == 0, !activities.isEmpty {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(.green)
+                            .help("No running or failed workflows")
+                    }
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 8)
@@ -126,15 +139,24 @@ private struct BranchesRepoAccordion: View {
         } else if visibleBranches.isEmpty {
             message("No watched branches", color: .secondary)
         } else {
+            let divergenceScale = visibleBranches.prefix(visibleLimit)
+                .filter { !$0.isDefault && $0.hasDivergence }
+                .map { max($0.behind, $0.ahead) }
+                .max() ?? 0
             TimelineView(.periodic(from: .now, by: 1)) { context in
                 let activities = Dictionary(uniqueKeysWithValues: appState.branchActivities(for: repo, now: context.date, window: .all).map { ($0.branch.name, $0.runs) })
-                VStack(spacing: 2) {
-                    ForEach(Array(visibleBranches.prefix(visibleLimit)), id: \.name) { branch in
+                VStack(spacing: 0) {
+                    ForEach(Array(visibleBranches.prefix(visibleLimit).enumerated()), id: \.element.name) { index, branch in
+                        if index > 0 {
+                            Divider()
+                                .padding(.horizontal, 8)
+                        }
                         BranchWithActionsRow(
                             branch: branch,
                             repoID: repo.id,
                             runs: activities[branch.name] ?? [],
                             hasWorkflowHistory: snapshot.runs.contains { $0.headBranch == branch.name },
+                            divergenceScale: divergenceScale,
                             now: context.date
                         )
                     }
@@ -156,7 +178,17 @@ private struct BranchesRepoAccordion: View {
 
     private func logVisibleBranches(event: String) {
         AppDiagnostics.info(.appState,
-            "branches view event=\(event) repo=\(repo.actionsTitle) total=\(snapshot.branches.count) watched=\(visibleBranches.count) visible=\(isOpen ? min(visibleLimit, visibleBranches.count) : 0) limit=\(visibleLimit) open=\(isOpen) alternatingRows=false statusAlignment=center mergedActions=true runs=\(snapshot.runs.count)")
+            "branches view event=\(event) repo=\(repo.actionsTitle) total=\(snapshot.branches.count) watched=\(visibleBranches.count) visible=\(isOpen ? min(visibleLimit, visibleBranches.count) : 0) limit=\(visibleLimit) open=\(isOpen) alternatingRows=false statusAlignment=top rowDividers=true runningBar=true divergenceGraph=true workflowPill=true mergedActions=true runs=\(snapshot.runs.count)")
+    }
+
+    private func countBadge(_ count: Int, color: Color, help: String) -> some View {
+        Text("\(count)")
+            .font(.system(size: 10, weight: .bold, design: .monospaced))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1)
+            .background(Capsule().fill(color.opacity(0.9)))
+            .help(help)
     }
 
     private func message(_ text: String, color: Color) -> some View {
@@ -167,122 +199,221 @@ private struct BranchesRepoAccordion: View {
     }
 }
 
+/// Line 1: branch name with the workflow pill and PR in fixed columns on the right.
+/// Line 2: commit age, with the behind|ahead graph underneath those columns.
 private struct WatchedBranchRow: View {
     @Environment(AppState.self) private var appState
     let branch: BranchInfo
     let repoID: UUID
     let checkState: BranchCheckState
-    let now: Date
+    let completedCount: Int
+    let completedExpanded: Bool
+    let onToggleCompleted: () -> Void
+    let divergenceScale: Int
     @State private var hovered = false
 
     var body: some View {
-        HStack(alignment: .center, spacing: 7) {
-            VStack(alignment: .leading, spacing: 5) {
-                Button {
-                    appState.openBranchOnGitHub(branch, in: repoID)
-                } label: {
-                    HStack(spacing: 5) {
-                        Text(branch.name)
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(Color.accentColor)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                        if branch.isDefault {
-                            Text("Default")
-                                .font(.system(size: 9))
-                                .foregroundStyle(.secondary)
-                        }
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .center, spacing: 4) {
+                Text(branch.name)
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .help(branch.name)
+
+                if branch.isDefault {
+                    Text("default")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(Color.primary.opacity(0.08)))
+                        .fixedSize()
+                }
+
+                Spacer(minLength: 0)
+
+                WorkflowStatusPill(state: checkState, completedCount: completedCount, expanded: completedExpanded)
+                    .fixedSize()
+                    .frame(width: 40, alignment: .trailing)
+
+                Group {
+                    if let pr = branch.pullRequest, !appState.pullRequestExclusions.contains(pr) {
+                        PullRequestPill(pullRequest: pr)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
                 }
-                .buttonStyle(PressableButtonStyle())
-                .help("Open \(branch.name) on GitHub")
-                .accessibilityLabel("Open branch \(branch.name)")
-
-                Text(relativeUpdatedAt)
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-                    .help("Last commit: \(branch.lastCommitAt.formatted())")
+                .frame(width: 60, alignment: .trailing)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
 
-            HStack(spacing: 7) {
-                BranchStateIcon(state: checkState)
-                    .frame(width: 12, height: 12)
-                    .help("Check status")
-                if branch.hasDivergence {
-                    DivergenceBadge(behind: branch.behind, ahead: branch.ahead)
-                } else {
-                    Text("↓ — ↑ —")
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(.tertiary)
-                        .help("Behind/ahead unavailable")
-                }
-                if let pr = branch.pullRequest, !appState.pullRequestExclusions.contains(pr) {
-                    PullRequestPill(pullRequest: pr)
-                }
+            if !branch.isDefault && branch.hasDivergence {
+                DivergenceGraph(behind: branch.behind, ahead: branch.ahead, scale: divergenceScale)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
             }
-            .fixedSize()
         }
-        .padding(.horizontal, 7)
-        .padding(.vertical, 6)
+        .padding(.leading, 8)
+        .padding(.trailing, 5)
+        .padding(.vertical, 5)
         .background(RoundedRectangle(cornerRadius: 5)
-            .fill(hovered ? Color.primary.opacity(0.06) : Color.clear))
+            .fill(hovered ? Color.primary.opacity(0.05) : Color.clear))
         .onHover { hovered = $0 }
+        // The whole row opens its workflow list; the PR pill keeps its own click.
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onToggleCompleted)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel("Branch \(branch.name), \(checkState.helpText)")
         .contextMenu {
+            Button("Open branch on GitHub") {
+                appState.openBranchOnGitHub(branch, in: repoID)
+            }
             Button("Hide until updated") {
                 appState.hideBranch(branch, in: repoID)
             }
             .help("Hide from SOURCR until a new commit lands on this branch")
         }
     }
-
-    private var relativeUpdatedAt: String {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return formatter.localizedString(for: branch.lastCommitAt, relativeTo: now)
-    }
 }
 
-/// Keep branch links separate from the workflow disclosure and detail selection.
+/// A branch with its running/failed runs always visible and completed runs behind the
+/// workflow pill. An orange bar on the leading edge marks branches with CI/CD in progress.
 private struct BranchWithActionsRow: View {
     @Environment(AppState.self) private var appState
     let branch: BranchInfo
     let repoID: UUID
     let runs: [ActionRun]
     let hasWorkflowHistory: Bool
+    let divergenceScale: Int
     let now: Date
 
     private var activity: BranchActivity { BranchActivity(repoID: repoID, branch: branch, runs: runs) }
     private var expanded: Bool { appState.isBranchExpanded(activity.id) }
     private var completedRuns: [ActionRun] { runs.filter { !$0.isRunning && !$0.isFailed } }
+    private var visibleRuns: [ActionRun] { activity.attentionRuns + (expanded ? completedRuns : []) }
+    private var isRunning: Bool { !activity.runningRuns.isEmpty }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 1) {
-            WatchedBranchRow(branch: branch, repoID: repoID, checkState: hasWorkflowHistory ? activity.state : (branch.checkState ?? .idle), now: now)
-            ForEach(activity.attentionRuns) { run in
-                RunLine(run: run, now: now)
-            }
-            if !completedRuns.isEmpty {
-                Button {
-                    appState.toggleBranchExpanded(activity.id)
-                    AppDiagnostics.info(.appState, "completed workflows branch=\(branch.name) expanded=\(expanded) count=\(completedRuns.count)")
-                } label: {
-                    Label(expanded ? "Hide completed workflows" : "Show completed workflows (\(completedRuns.count))",
-                          systemImage: expanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .padding(.leading, 7)
-                .padding(.vertical, 3)
-                if expanded {
-                    ForEach(completedRuns) { run in
+        VStack(alignment: .leading, spacing: 0) {
+            WatchedBranchRow(
+                branch: branch,
+                repoID: repoID,
+                checkState: hasWorkflowHistory ? activity.state : (branch.checkState ?? .idle),
+                completedCount: completedRuns.count,
+                completedExpanded: expanded,
+                onToggleCompleted: toggleCompleted,
+                divergenceScale: divergenceScale
+            )
+            if !visibleRuns.isEmpty {
+                VStack(spacing: 0) {
+                    ForEach(visibleRuns) { run in
                         RunLine(run: run, now: now)
                     }
                 }
+                .overlay(alignment: .leading) {
+                    Rectangle()
+                        .fill(Color.primary.opacity(0.14))
+                        .frame(width: 1)
+                        .padding(.leading, 15)
+                        .padding(.vertical, 4)
+                }
+                .padding(.bottom, 3)
             }
         }
+        .padding(.vertical, 3)
+        .overlay(alignment: .leading) {
+            if isRunning {
+                Capsule()
+                    .fill(Color.orange)
+                    .frame(width: 3)
+                    .padding(.vertical, 6)
+                    .help("CI/CD running")
+            }
+        }
+    }
+
+    private func toggleCompleted() {
+        appState.toggleBranchExpanded(activity.id)
+        AppDiagnostics.info(.appState, "completed workflows branch=\(branch.name) expanded=\(expanded) count=\(completedRuns.count)")
+    }
+}
+
+/// GitHub's branch-list divergence graph: behind | ahead around a centre rule, with
+/// grey bars scaled against the largest divergence in the visible list.
+private struct DivergenceGraph: View {
+    static let width: CGFloat = 92
+    let behind: Int
+    let ahead: Int
+    let scale: Int
+
+    private var halfWidth: CGFloat { Self.width / 2 }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 0) {
+            side(behind, alignment: .trailing)
+            Rectangle()
+                .fill(Color.primary.opacity(0.22))
+                .frame(width: 1, height: 19)
+            side(ahead, alignment: .leading)
+        }
+        .help("\(behind) commit\(behind == 1 ? "" : "s") behind · \(ahead) ahead of the default branch")
+    }
+
+    private func side(_ value: Int, alignment: HorizontalAlignment) -> some View {
+        VStack(alignment: alignment, spacing: 2) {
+            Text("\(value)")
+                .font(.system(size: 10, weight: .medium).monospacedDigit())
+                .foregroundStyle(value == 0 ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.secondary))
+                .padding(.horizontal, 5)
+            Rectangle()
+                .fill(Color.primary.opacity(0.13))
+                .frame(width: barWidth(value), height: 3)
+        }
+        .frame(width: halfWidth, alignment: Alignment(horizontal: alignment, vertical: .top))
+    }
+
+    private func barWidth(_ value: Int) -> CGFloat {
+        guard value > 0, scale > 0 else { return 0 }
+        return max(3, (halfWidth - 2) * CGFloat(value) / CGFloat(scale))
+    }
+}
+
+/// Branch workflow status and completed-run count in one pill, tinted by state:
+/// orange running, red failed, green passed. Clicking the row reveals the runs.
+private struct WorkflowStatusPill: View {
+    let state: BranchCheckState
+    let completedCount: Int
+    let expanded: Bool
+
+    var body: some View {
+        if state == .idle && completedCount == 0 {
+            EmptyView()
+        } else {
+            HStack(spacing: 3) {
+                BranchStateIcon(state: state)
+                    .frame(width: 11, height: 11)
+                if completedCount > 0 {
+                    Text("\(completedCount)")
+                        .font(.system(size: 10, weight: .semibold).monospacedDigit())
+                }
+            }
+            .foregroundStyle(tint)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(tint.opacity(expanded ? 0.24 : 0.12)))
+            .overlay(Capsule().strokeBorder(tint.opacity(0.35), lineWidth: 1))
+            .help(helpText)
+        }
+    }
+
+    private var tint: Color {
+        switch state {
+        case .running: return .orange
+        case .failed: return .red
+        case .clean: return .green
+        case .idle: return .secondary
+        }
+    }
+
+    private var helpText: String {
+        guard completedCount > 0 else { return state.helpText }
+        return "\(state.helpText) · \(completedCount) completed workflow\(completedCount == 1 ? "" : "s") · click the branch to \(expanded ? "hide" : "show") them"
     }
 }

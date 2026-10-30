@@ -80,6 +80,9 @@ final class AppState {
             onPanelPinnedChanged?(isPanelPinned)
         }
     }
+    /// Set by the panel controller when the detail pane opens; true when the display
+    /// has more room to the right of the list than to its left.
+    var detailPaneOnRight = false
     var isExpanded = false {
         didSet {
             if isExpanded != oldValue {

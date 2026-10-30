@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.26
+
+- Redesigned the Branches row so it is easier to scan. The branch name now owns the first line with the workflow pill and pull-request badge in fixed, top-aligned columns, and thin dividers separate neighbouring branches instead of leaving rows to run together.
+- Added an orange leading bar and an orange progress ring to every branch with CI/CD running, restoring the at-a-glance running indicator lost when the Actions board merged into Branches. Failures keep the existing red cross; repository headers again show orange running and red failed counts or a green tick, and no longer show a grey branch count.
+- Combined branch check status and the completed-workflow toggle into one state-tinted pill showing the status icon and number of completed workflows. Clicking anywhere on a branch row now reveals or hides its workflow runs, replacing the long Show completed workflows text button.
+- Replaced the arrow divergence badge with GitHub's behind | ahead graph: counts either side of a centre rule with grey bars scaled against the most diverged visible branch. The graph sits on the second line beneath the pills, and the default branch omits it.
+- Branch names now truncate at the end rather than the middle and use the space freed by moving divergence and removing the commit-age line, showing at least half again as many characters before truncation. Branch links moved to the row's context menu as Open branch on GitHub, alongside Hide until updated.
+- Gave the pull-request badge a fixed column wide enough for five-digit PR numbers on a single line, so it no longer wraps or overlaps the workflow pill. Workflow lines under a branch are tied to it by a faint vertical guide.
+- The workflow and diff detail pane now opens towards whichever side of the display has more room around the list column. A panel parked near the left edge expands to the right so the clicked list stays in place; the side is chosen once per expansion so dragging never flips it, and ties keep the previous leftward behaviour.
+- GitHub tokens are now read for the exact configured account with read-only gh auth token --user and cached in memory for the session. SOURCR no longer reads its own Keychain copy on every launch, which stopped repeated Keychain password prompts after each rebuild or release; tokens pasted with + remain stored in SOURCR's Keychain item as the fallback.
+- Added run-dev.sh for local iteration: it builds the working tree, signs with a stable local identity, replaces the running SOURCR and opens the panel without packaging or installing. Added detail-pane side tests, updated README and diagnostics, and advanced version and build to 1.26; SOURCR remains strictly read-only.
+
 ## 1.25
 
 - Put running and failed workflow rows directly beneath their branch, before any disclosure control. The normal branch view immediately exposes activity that needs attention, using the same representative-run selection and live timers as the former Actions board.

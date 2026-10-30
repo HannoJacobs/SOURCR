@@ -4,9 +4,9 @@ Menu-bar **Source Control** viewer for macOS — a read-only, VS Code / Cursor-s
 
 ```
 Menu bar icon
-    └─ Anchored panel (right edge pinned to the status item)
-         ├─ Diff pane (left, expands only when a file is selected)
-         └─ SCM column (right, fixed width)
+    └─ Anchored panel (list column pinned under the status item)
+         ├─ Detail pane (diff or workflow steps; opens towards the side with more room)
+         └─ SCM column (fixed width)
               ├─ Header: Branches | Diff (icons) · Pin · Detach · Refresh · Add · Settings
               ├─ Multi-repo accordion (drag grip to reorder)
               └─ Flat changes + untracked list (no footer; Quit lives in Settings)
@@ -16,15 +16,17 @@ Menu bar icon
 
 - Lives in the menu bar (`LSUIElement`)
 - Watch local git repositories for **Diff** and GitHub repositories for **Branches**, including workflow activity (separate GitHub list from Diff)
-- **Branches mode:** Pins the default branch first, then shows remote branches newest-commit first, ten per repository; **Show more** adds ten. Check status, divergence, and PR badges are vertically centred beside the branch name and timestamp. Each row links its branch and PR in the Mac’s default browser and shows last commit time, current-head checks, and behind/ahead counts against the default branch. Right-click **Hide until updated** to hide that commit locally; a changed branch head brings it back, including after relaunch.
+- **Branches mode:** Pins the default branch first, then shows remote branches newest-commit first, ten per repository; **Show more** adds ten. Each row shows the branch name (truncated at the end) with a workflow pill and PR badge in fixed columns, and a GitHub-style behind | ahead graph against the default branch beneath them. Rows are separated by dividers. Right-click a branch to open it on GitHub or **Hide until updated** to hide that commit locally; a changed branch head brings it back, including after relaunch.
+- **Workflow pill:** one pill per branch tinted by state — orange spinner while CI/CD runs, red cross for failures, green tick when passing — with the number of completed workflows. Branches with running CI/CD also get an orange bar on their leading edge, and repository headers show orange running / red failed counts or a green tick.
 - Right-click a PR badge and choose **Hide until updated** to dismiss that observed PR revision locally. The badge returns when the PR changes; GitHub is never modified.
 - The mode selector uses icons in **Branches → Diff** order, with tooltips and accessible labels.
 - **Diff mode:** Shows combined staged + dirty changes and untracked files on the **current branch**
 - Click a file to open a diff to the left (Inline or Side By Side); click again to collapse
-- **Workflow activity:** Running and failed workflows appear below their branch; Show workflows reveals the remaining latest workflow results. Timers update live, and selecting a workflow opens its job and step detail.
+- **Workflow activity:** Running and failed workflows appear below their branch. Click anywhere on a branch row to show or hide its completed workflow results. Timers update live, and selecting a workflow opens its job and step detail.
 - Add a GitHub repository with its GitHub URL, SSH origin, or `owner/repo` in Branches Settings; the header’s Add button opens that form
 - Existing Actions folder watches convert to saved GitHub links once; if a folder was already removed, use its pencil button in Branches Settings to set the link
-- Click a workflow run to expand job/step detail to the left (same leftward expand as Diff); click again to collapse
+- Click a workflow run to expand job/step detail beside the list; click again to collapse
+- The detail pane (Diff or workflow steps) opens towards whichever side of the display has more room, so the list you clicked stays in place
 - Right-click any workflow run and choose **Remove** to permanently ignore that run in SOURCR. It disappears from the board and branch/repository health indicators, including after refresh or relaunch. GitHub history stays intact; new runs of that workflow still appear. Exclusions apply to the GitHub repository and run ID (including reruns of that ID), and survive removing and re-adding the repository. If every result is excluded, the branch is idle rather than reported as passing.
 - Repository headings use the GitHub repository name; right-click a heading to open GitHub’s **All branches** page or remove the watch
 - Settings manage local Diff repositories separately from the Branches GitHub list
@@ -53,7 +55,7 @@ Read-only by design: `GitService` only allows `status`, `diff`, `show`, `rev-par
 - macOS 14+
 - Xcode (for Release `.app` / DMG packaging)
 - `git` on `PATH` (`/usr/bin/git`)
-- GitHub CLI (`gh`) installed for Actions. Choose a GitHub account per repository in Branches Settings; SOURCR stores its own credential copy in Keychain.
+- GitHub CLI (`gh`) installed for Actions. Choose a GitHub account per repository in Branches Settings. SOURCR reads that exact account's token read-only with `gh auth token --user` and keeps it in memory, so rebuilds and releases do not trigger Keychain prompts; a token pasted with + is kept in SOURCR's own Keychain item as the fallback.
 
 ## Develop
 
@@ -67,6 +69,8 @@ swift test
 ```
 
 Run the `SOURCR` scheme on **My Mac**.
+
+For quick UI iteration without a release, `./run-dev.sh` builds the working tree, signs it with the local `SOURCR Local Signing` identity (ad-hoc if absent), replaces the running SOURCR from `build-dev.noindex/`, and opens the panel. It shares the release bundle ID, so watched repositories and settings carry over. Nothing is committed, packaged, or installed to `/Applications`.
 
 ## Release / install (DICTATR-style full send)
 
@@ -94,14 +98,13 @@ Launch evidence is written to:
 | Piece | Role |
 |---|---|
 | `SOURCRApp` / `SOURCRAppDelegate` | Accessory app + status-item wiring |
-| `StatusPanelController` | Anchored `NSPanel`, outside-click dismiss, leftward expand |
+| `StatusPanelController` | Anchored `NSPanel`, outside-click dismiss, side-aware detail expand |
 | `AppState` | Watched repos, Diff/Branches mode, snapshots, selection, refresh, reorder |
 | `ExternalProcess` | Shared temp-file + watchdog CLI runner for `git` / `gh` |
 | `GitService` | Read-only git CLI wrapper |
 | `GitHubActionsService` | Read-only `gh` Actions list/detail + remote URL parse |
 | `DiffParser` | Unified + side-by-side rendering model |
 | `VSCodeSCMView` | Right-column multi-repo SCM + drag reorder |
-| `ActionsSCMView` | Right-column Actions list (active runs or latest completed attempt per workflow) |
 | `BranchesSCMView` | Remote branch overview with default-browser GitHub links |
 | `DiffPane` / `ActionsDetailPane` | Left-expand detail for file diffs or workflow steps |
 | `SettingsPanel` | Viewer controls (right column overlay) |

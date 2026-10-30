@@ -48,7 +48,7 @@ struct BranchStateIcon: View {
     var body: some View {
         switch state {
         case .running:
-            ProgressView().controlSize(.mini)
+            RunningSpinner()
         case .failed:
             Image(systemName: "xmark")
                 .font(.system(size: 10, weight: .bold))
@@ -65,28 +65,29 @@ struct BranchStateIcon: View {
     }
 }
 
-/// Commits behind ↓ / ahead ↑ of the default branch. A zero side dims out so the
-/// eye only lands on real divergence.
-struct DivergenceBadge: View {
-    let behind: Int
-    let ahead: Int
-
-    var body: some View {
-        HStack(spacing: 5) {
-            part(symbol: "arrow.down", value: behind)
-            part(symbol: "arrow.up", value: ahead)
+extension BranchCheckState {
+    var helpText: String {
+        switch self {
+        case .running: return "CI/CD running"
+        case .failed: return "Checks failed"
+        case .clean: return "Checks passed"
+        case .idle: return "No checks"
         }
-        .help("\(behind) behind · \(ahead) ahead of the default branch")
     }
+}
 
-    private func part(symbol: String, value: Int) -> some View {
-        HStack(spacing: 1) {
-            Image(systemName: symbol)
-                .font(.system(size: 7, weight: .bold))
-            Text("\(value)")
-                .font(.system(size: 10, weight: .medium, design: .monospaced))
+/// Orange in-progress ring; the system mini spinner is grey and easy to miss.
+struct RunningSpinner: View {
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30)) { context in
+            let turns = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1)
+            Circle()
+                .trim(from: 0, to: 0.72)
+                .stroke(Color.orange, style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
+                .rotationEffect(.degrees(turns * 360))
+                .padding(1.5)
         }
-        .foregroundStyle(value == 0 ? AnyShapeStyle(.quaternary) : AnyShapeStyle(Color.secondary))
+        .frame(width: 12, height: 12)
     }
 }
 
@@ -109,6 +110,8 @@ struct PullRequestPill: View {
                     .font(.system(size: 10, weight: .semibold, design: .monospaced))
             }
             .foregroundStyle(pullRequest.state.tint)
+            .lineLimit(1)
+            .fixedSize()
             .padding(.horizontal, 5)
             .padding(.vertical, 1)
             .background(
@@ -194,8 +197,7 @@ struct ActionStatusIcon: View {
 
     var body: some View {
         if run.isRunning {
-            ProgressView()
-                .controlSize(.mini)
+            RunningSpinner()
         } else if run.isFailed {
             Image(systemName: "xmark")
                 .font(.system(size: 10, weight: .bold))

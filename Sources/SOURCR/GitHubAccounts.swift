@@ -91,6 +91,8 @@ final class GitHubAccounts {
     private(set) var accounts: [GitHubAccount]
     private(set) var cliLogins: [String] = []
     var discoveryError: String?
+    /// Tokens resolved this launch, so each refresh does not hit the CLI or Keychain again.
+    private var resolvedCredentials: [String: GitHubCredential] = [:]
 
     var logins: [String] {
         Array(Set(accounts.map(\.login) + cliLogins)).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
@@ -122,47 +124,59 @@ final class GitHubAccounts {
         guard let login, !login.isEmpty else {
             throw GitHubAccountError.message("Choose a GitHub account for this repository in Actions Settings.")
         }
-        return try await Task.detached { try SOURCRKeychain.load(login) }.value
+        if let cached = resolvedCredentials[login.lowercased()] { return cached }
+        // Prefer the gh CLI's own login for this exact account: gh is a stable, already-trusted
+        // Keychain client, so SOURCR rebuilds and releases no longer trigger Keychain prompts.
+        // Tokens pasted with + live only in SOURCR's Keychain item and remain the fallback.
+        let credential = try await Task.detached {
+            try (try? Self.cliCredential(for: login)) ?? SOURCRKeychain.load(login)
+        }.value
+        resolvedCredentials[login.lowercased()] = credential
+        return credential
     }
 
-    /// Explicitly selected CLI account, copied once into SOURCR's own Keychain.
+    /// Explicitly selected CLI account. Its token stays in gh; SOURCR only records the login.
     func connectExisting(_ login: String) async throws {
         if accounts.contains(where: { $0.id == login.lowercased() }) {
             _ = try await credential(for: login)
             return
         }
-        let credential = try await Task.detached {
-            guard let executable = SOURCRGitHubEnvironment.executable else { throw GitHubActionsError.ghNotFound }
-            // Unlike the shared runner, this small secret stays in a pipe in memory,
-            // never in process arguments, logs, or a temporary stdout file.
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: executable)
-            process.arguments = ["auth", "token", "--hostname", "github.com", "--user", login]
-            process.environment = SOURCRGitHubEnvironment.base()
-            let output = Pipe()
-            process.standardOutput = output
-            process.standardError = FileHandle.nullDevice
-            try process.run()
-            let watchdog = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
-            watchdog.schedule(deadline: .now() + 25)
-            watchdog.setEventHandler {
-                if process.isRunning { process.terminate() }
-            }
-            watchdog.resume()
-            defer { watchdog.cancel() }
-            let data = output.fileHandleForReading.readDataToEndOfFile()
-            process.waitUntilExit()
-            guard process.terminationStatus == 0,
-                  let token = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines), !token.isEmpty else {
-                throw GitHubAccountError.message("Could not read \(login)'s CLI credential. Connect it with + instead.")
-            }
-            return GitHubCredential(login: login, token: token)
-        }.value
+        let credential = try await Task.detached { try Self.cliCredential(for: login) }.value
         let verified = try await Self.validate(token: credential.token)
         guard verified.login.caseInsensitiveCompare(login) == .orderedSame else {
             throw GitHubAccountError.message("The credential does not belong to \(login). Connect the intended account with +.")
         }
-        try await store(verified)
+        resolvedCredentials[login.lowercased()] = verified
+        rememberAccount(login)
+    }
+
+    /// Read-only `gh auth token --user`: names the account explicitly, never switches it.
+    private nonisolated static func cliCredential(for login: String) throws -> GitHubCredential {
+        guard let executable = SOURCRGitHubEnvironment.executable else { throw GitHubActionsError.ghNotFound }
+        // Unlike the shared runner, this small secret stays in a pipe in memory,
+        // never in process arguments, logs, or a temporary stdout file.
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = ["auth", "token", "--hostname", "github.com", "--user", login]
+        process.environment = SOURCRGitHubEnvironment.base()
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        let watchdog = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
+        watchdog.schedule(deadline: .now() + 25)
+        watchdog.setEventHandler {
+            if process.isRunning { process.terminate() }
+        }
+        watchdog.resume()
+        defer { watchdog.cancel() }
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0,
+              let token = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines), !token.isEmpty else {
+            throw GitHubAccountError.message("Could not read \(login)'s CLI credential. Connect it with + instead.")
+        }
+        return GitHubCredential(login: login, token: token)
     }
 
     func connectToken(_ token: String) async throws -> String {
@@ -173,9 +187,16 @@ final class GitHubAccounts {
 
     private func store(_ credential: GitHubCredential) async throws {
         try await Task.detached { try SOURCRKeychain.save(credential) }.value
-        accounts.removeAll { $0.id == credential.login.lowercased() }
-        accounts.append(GitHubAccount(login: credential.login))
-        UserDefaults.standard.set(try JSONEncoder().encode(accounts), forKey: Self.defaultsKey)
+        resolvedCredentials[credential.login.lowercased()] = credential
+        rememberAccount(credential.login)
+    }
+
+    private func rememberAccount(_ login: String) {
+        accounts.removeAll { $0.id == login.lowercased() }
+        accounts.append(GitHubAccount(login: login))
+        if let data = try? JSONEncoder().encode(accounts) {
+            UserDefaults.standard.set(data, forKey: Self.defaultsKey)
+        }
     }
 
     private nonisolated static func validate(token: String) async throws -> GitHubCredential {
