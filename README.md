@@ -8,7 +8,7 @@ Menu bar icon
          ├─ Detail pane (diff or workflow steps; opens towards the side with more room)
          └─ SCM column (fixed width)
               ├─ Header: Branches | Diff (icons) · Pin · Detach · Refresh · Add · Settings
-              ├─ Multi-repo accordion (drag grip to reorder)
+              ├─ Multi-repo accordion (drag grip to reorder, in Branches and Diff)
               └─ Flat changes + untracked list (no footer; Quit lives in Settings)
 ```
 
@@ -16,8 +16,8 @@ Menu bar icon
 
 - Lives in the menu bar (`LSUIElement`)
 - Watch local git repositories for **Diff** and GitHub repositories for **Branches**, including workflow activity (separate GitHub list from Diff)
-- **Branches mode:** Pins the default branch first, then shows remote branches newest-commit first, ten per repository; **Show more** adds ten. Each row shows the branch name (truncated at the end) with a workflow pill and PR badge in fixed columns, and a GitHub-style behind | ahead graph against the default branch beneath them. Rows are separated by dividers. Right-click a branch to open it on GitHub or **Hide until updated** to hide that commit locally; a changed branch head brings it back, including after relaunch.
-- **Workflow pill:** one pill per branch tinted by state — orange spinner while CI/CD runs, red cross for failures, green tick when passing — with the number of completed workflows. Branches with running CI/CD also get an orange bar on their leading edge, and repository headers show orange running / red failed counts or a green tick.
+- **Branches mode:** Pins the default branch first, then shows remote branches newest-commit first, ten per repository; **Show more** adds ten. Each row shows the branch name (truncated at the end) with a workflow pill and PR badge in fixed columns, and a GitHub-style behind | ahead graph against the default branch beneath them. Rows are separated by dividers. The link icon at the right of each repository header opens its All branches page on GitHub. Right-click a branch to open it on GitHub or **Hide until updated** to hide that commit locally; a changed branch head brings it back, including after relaunch.
+- **Workflow pill:** once every workflow on a branch has finished, one pill shows a green tick or red cross with the number of completed workflows. While anything is running the pill is hidden; each running workflow shows its own orange spinner beneath the branch. Repository headers show orange running / red failed counts or a green tick.
 - Right-click a PR badge and choose **Hide until updated** to dismiss that observed PR revision locally. The badge returns when the PR changes; GitHub is never modified.
 - The mode selector uses icons in **Branches → Diff** order, with tooltips and accessible labels.
 - **Diff mode:** Shows combined staged + dirty changes and untracked files on the **current branch**
@@ -35,7 +35,7 @@ Menu bar icon
 - Opening the panel (or bringing it to the foreground) immediately refreshes Diff and Actions
 - While the panel is visible, Diff and Actions both refresh every ~10s (no manual Refresh needed to catch a finished CD)
 - Pin (next to Refresh) keeps the panel in front while you work in other apps; unpin restores normal click-away dismiss
-- Panel height follows open Diff/Branches content (up to a max) so collapsed repos don’t leave a tall empty window
+- Panel height follows open Diff/Branches content, growing down to the bottom of the screen before the list scrolls, so collapsed repos don’t leave a tall empty window
 - Git/`gh` child processes drain pipes while running and time out (so a huge `git status -uall` or stuck `gh` cannot freeze refreshes until quit)
 - In-flight Diff/`gh` refreshes are allowed to finish after the panel hides, so a quick open/close cannot leave a stale dirty count on screen
 - Panel stays on the status-item’s display across Diff ↔ Branches resizes (does not follow `NSScreen.main` / focus to another monitor)
@@ -70,7 +70,7 @@ swift test
 
 Run the `SOURCR` scheme on **My Mac**.
 
-For quick UI iteration without a release, `./run-dev.sh` builds the working tree, signs it with the local `SOURCR Local Signing` identity (ad-hoc if absent), replaces the running SOURCR from `build-dev.noindex/`, and opens the panel. It shares the release bundle ID, so watched repositories and settings carry over. Nothing is committed, packaged, or installed to `/Applications`.
+For quick UI iteration without a release, `./run-dev.sh` builds the working tree, signs it with the local `SOURCR Local Signing` identity (ad-hoc if absent), installs it over `/Applications/SOURCR.app`, relaunches it and opens the panel. Keeping one installed copy means Spotlight always opens the latest build. Nothing is committed, pushed, or packaged; the next full send replaces it with the Release build.
 
 ## Release / install (DICTATR-style full send)
 

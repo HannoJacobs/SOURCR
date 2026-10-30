@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import SwiftUI
 
@@ -7,8 +8,11 @@ enum SOURCRLayout {
 
     /// Smallest usable panel (header + short body).
     static let minPanelHeight: CGFloat = 160
-    /// Cap so a huge file/run list scrolls instead of covering the display.
-    static let maxPanelHeight: CGFloat = 560
+    /// Content may grow to the tallest display; the panel controller then caps the
+    /// window to the space below its top edge on its own screen, and the list scrolls.
+    static var maxPanelHeight: CGFloat {
+        NSScreen.screens.map(\.visibleFrame.height).max() ?? 900
+    }
     /// When Diff/Actions detail is open, keep enough height to read the left pane.
     static let minExpandedPanelHeight: CGFloat = 420
     /// Empty-list placeholder body height.
@@ -40,7 +44,9 @@ struct SCMBodyHeightFrame: ViewModifier {
         if fill {
             content.frame(maxHeight: .infinity, alignment: .top)
         } else {
-            content.frame(height: displayHeight, alignment: .top)
+            // Flexible so the list shrinks to the window when the screen caps it,
+            // keeping the bottom of the list reachable by scrolling.
+            content.frame(minHeight: 0, idealHeight: displayHeight, maxHeight: displayHeight, alignment: .top)
         }
     }
 

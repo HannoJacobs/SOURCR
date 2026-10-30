@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.27
+
+- Added a link icon at the far right of every Branches repository header. One click opens that repository's GitHub All branches page in the default browser, while the rest of the header still expands and collapses the repository.
+- Added a drag grip to the left of each Branches repository header's disclosure arrow. Dragging it shows a floating header preview and an accent insertion line, and releasing saves the new repository order; the Diff list now shares the same reorder component instead of carrying its own copy.
+- Removed the panel's fixed 560-point height cap. Content now grows down to the bottom of the display before scrolling, and the list shrinks to the window when the screen limits it so the last repository stays reachable.
+- The workflow pill now appears only after every workflow on a branch has finished, showing a green tick or red cross with the completed count. While anything runs it is hidden, because each running workflow already shows its own orange spinner, which removes the duplicate spinners per branch.
+- Moved the behind | ahead graph onto the branch-name line in a narrower right-anchored column before the pills, removing the empty band between a branch and its first running workflow. Rows without divergence, including the default branch, give that width back to the name.
+- Removed the orange leading bar and the vertical guide line beside workflow runs, and aligned workflow rows flush left with the branch name for a calmer list.
+- run-dev.sh now installs each local build over /Applications/SOURCR.app and removes its staging copy, so Spotlight and Finder always open the most recent build and no second SOURCR is left on the Mac between releases.
+- Updated README for the header link, reorder grip, screen-height panel and finished-only workflow pill. Advanced version and build to 1.27; SOURCR remains strictly read-only and never changes branches, commits or GitHub state.
+
 ## 1.26
 
 - Redesigned the Branches row so it is easier to scan. The branch name now owns the first line with the workflow pill and pull-request badge in fixed, top-aligned columns, and thin dividers separate neighbouring branches instead of leaving rows to run together.

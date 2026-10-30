@@ -1,26 +1,12 @@
 import AppKit
 import SwiftUI
 
-/// Reports each repo row's frame (in the list coordinate space) so drag-reorder
-/// can work with variable-height accordions.
-private struct RepoFrameKey: PreferenceKey {
-    static var defaultValue: [UUID: CGRect] = [:]
-    static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
-        value.merge(nextValue()) { _, new in new }
-    }
-}
-
 /// VS Code–style multi-repo Source Control accordion (right pane).
 /// Top chrome (refresh/add/settings) lives in MenuBarView.
 struct VSCodeSCMView: View {
     @Environment(AppState.self) private var appState
 
-    // Drag-to-reorder state (mirrors NOTR's pin reordering).
-    @State private var draggingRepoID: UUID?
-    @State private var dragOriginIndex: Int?
-    @State private var dragTargetSlot: Int?
-    @State private var dragTranslation: CGFloat = 0
-    @State private var repoFrames: [UUID: CGRect] = [:]
+    @State private var isReordering = false
     @State private var measuredBodyHeight: CGFloat = 0
 
     var body: some View {
@@ -31,54 +17,18 @@ struct VSCodeSCMView: View {
                     .onAppear { appState.reportSCMBodyHeight(SOURCRLayout.emptyBodyHeight) }
             } else {
                 ScrollView {
-                    // Eager VStack so body height measures the full accordion stack
-                    // (LazyVStack only lays out visible rows and under-reports).
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(Array(appState.diffRepos.enumerated()), id: \.element.id) { index, repo in
-                            RepoAccordion(
-                                repo: repo,
-                                index: index,
-                                isDragging: draggingRepoID == repo.id,
-                                reorderActive: draggingRepoID != nil,
-                                onDragChanged: { idx, value in handleDragChanged(repo: repo, index: idx, value: value) },
-                                onDragEnded: { handleDragEnded() }
-                            )
-                            .background(
-                                GeometryReader { proxy in
-                                    Color.clear.preference(
-                                        key: RepoFrameKey.self,
-                                        value: [repo.id: proxy.frame(in: .named("repoList"))]
-                                    )
-                                }
-                            )
-                            .opacity(draggingRepoID == repo.id ? 0.3 : 1)
-                            .zIndex(draggingRepoID == repo.id ? 10 : 0)
-                        }
+                    RepoReorderStack(repos: appState.diffRepos, mode: .diff, isReordering: $isReordering) { repo, drag in
+                        RepoAccordion(repo: repo, drag: drag)
+                    } preview: { repo in
+                        RepoDragPreview(repo: repo, snap: appState.snapshots[repo.id] ?? .empty)
                     }
-                    .padding(.vertical, 6)
-                    .padding(.horizontal, 6)
-                    .coordinateSpace(name: "repoList")
-                    .onPreferenceChange(RepoFrameKey.self) { repoFrames = $0 }
                     .background(
                         GeometryReader { proxy in
                             Color.clear.preference(key: SCMBodyHeightKey.self, value: proxy.size.height)
                         }
                     )
-                    .overlay(alignment: .topLeading) {
-                        if let lineY = insertionLineY {
-                            Capsule()
-                                .fill(Color.accentColor)
-                                .frame(height: 2)
-                                .padding(.horizontal, 10)
-                                .offset(y: lineY)
-                                .allowsHitTesting(false)
-                        }
-                    }
-                    .overlay(alignment: .topLeading) {
-                        dragPreview
-                    }
                 }
-                .scrollDisabled(draggingRepoID != nil)
+                .scrollDisabled(isReordering)
                 .frame(maxWidth: .infinity)
                 .modifier(SCMBodyHeightFrame(measured: measuredBodyHeight, fill: appState.isExpanded))
                 .onPreferenceChange(SCMBodyHeightKey.self) { height in
@@ -114,87 +64,6 @@ struct VSCodeSCMView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    // MARK: - Drag reorder
-
-    private func handleDragChanged(repo: WatchedRepo, index: Int, value: DragGesture.Value) {
-        if draggingRepoID == nil {
-            draggingRepoID = repo.id
-            dragOriginIndex = index
-            dragTargetSlot = index
-        }
-        guard draggingRepoID == repo.id else { return }
-
-        var transaction = Transaction()
-        transaction.disablesAnimations = true
-        withTransaction(transaction) {
-            dragTranslation = value.translation.height
-        }
-
-        let pointerY = value.location.y
-        let slot = insertionSlot(forPointerY: pointerY)
-        if slot != dragTargetSlot {
-            withTransaction(transaction) { dragTargetSlot = slot }
-        }
-    }
-
-    private func handleDragEnded() {
-        let origin = dragOriginIndex
-        let slot = dragTargetSlot
-
-        var transaction = Transaction()
-        transaction.disablesAnimations = true
-        withTransaction(transaction) {
-            draggingRepoID = nil
-            dragOriginIndex = nil
-            dragTargetSlot = nil
-            dragTranslation = 0
-        }
-
-        guard let origin, let slot else { return }
-        let target = slot > origin ? slot - 1 : slot
-        if target != origin {
-            appState.moveRepo(from: origin, to: target, in: .diff)
-        }
-    }
-
-    private func insertionSlot(forPointerY pointerY: CGFloat) -> Int {
-        var slot = 0
-        for (i, repo) in appState.diffRepos.enumerated() {
-            if let rect = repoFrames[repo.id], pointerY > rect.midY {
-                slot = i + 1
-            }
-        }
-        return max(0, min(appState.diffRepos.count, slot))
-    }
-
-    private var insertionLineY: CGFloat? {
-        guard let origin = dragOriginIndex, let slot = dragTargetSlot,
-              slot != origin, slot != origin + 1
-        else { return nil }
-
-        let repos = appState.diffRepos
-        if slot <= 0 {
-            return (repoFrames[repos[0].id]?.minY ?? 0) - 4
-        }
-        if slot >= repos.count {
-            return (repoFrames[repos[repos.count - 1].id]?.maxY ?? 0) + 3
-        }
-        let above = repoFrames[repos[slot - 1].id]?.maxY ?? 0
-        let below = repoFrames[repos[slot].id]?.minY ?? above
-        return (above + below) / 2
-    }
-
-    @ViewBuilder
-    private var dragPreview: some View {
-        if let id = draggingRepoID,
-           let repo = appState.diffRepos.first(where: { $0.id == id }),
-           let rect = repoFrames[id] {
-            RepoDragPreview(repo: repo, snap: appState.snapshots[id] ?? .empty)
-                .frame(width: rect.width, height: rect.height)
-                .offset(x: rect.minX, y: rect.minY + dragTranslation)
-                .allowsHitTesting(false)
-        }
-    }
 }
 
 /// Lightweight floating snapshot of a repo header shown while dragging.
@@ -240,14 +109,9 @@ private struct RepoDragPreview: View {
 private struct RepoAccordion: View {
     @Environment(AppState.self) private var appState
     let repo: WatchedRepo
-    let index: Int
-    var isDragging: Bool = false
-    var reorderActive: Bool = false
-    var onDragChanged: (Int, DragGesture.Value) -> Void = { _, _ in }
-    var onDragEnded: () -> Void = {}
+    let drag: RepoDragHandle
 
     @State private var headerHovered = false
-    @State private var gripHovered = false
 
     private var snap: RepoSnapshot {
         appState.snapshots[repo.id] ?? .empty
@@ -290,24 +154,9 @@ private struct RepoAccordion: View {
         )
     }
 
-    private var grip: some View {
-        Image(systemName: "line.3.horizontal")
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(isDragging || gripHovered ? Color.accentColor : Color.secondary)
-            .frame(width: 20, height: 28)
-            .contentShape(Rectangle())
-            .onHover { gripHovered = $0 }
-            .highPriorityGesture(
-                DragGesture(minimumDistance: 3, coordinateSpace: .named("repoList"))
-                    .onChanged { onDragChanged(index, $0) }
-                    .onEnded { _ in onDragEnded() }
-            )
-            .help("Drag up or down to reorder")
-    }
-
     private var header: some View {
         HStack(spacing: 4) {
-            grip
+            RepoDragGrip(handle: drag)
 
             Button {
                 withAnimation(.easeInOut(duration: 0.12)) {
@@ -356,7 +205,7 @@ private struct RepoAccordion: View {
             }
             .buttonStyle(PressableButtonStyle())
             .onHover { headerHovered = $0 }
-            .disabled(reorderActive)
+            .disabled(drag.reorderActive)
         }
         .background(headerHovered ? Color.primary.opacity(0.10) : Color.primary.opacity(0.06))
         .contentShape(Rectangle())

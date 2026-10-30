@@ -5,6 +5,7 @@ import SwiftUI
 struct BranchesSCMView: View {
     @Environment(AppState.self) private var appState
     @State private var measuredBodyHeight: CGFloat = 0
+    @State private var isReordering = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -26,16 +27,16 @@ struct BranchesSCMView: View {
                 .onAppear { appState.reportSCMBodyHeight(SOURCRLayout.emptyBodyHeight) }
             } else {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(appState.actionsRepos) { repo in
-                            BranchesRepoAccordion(repo: repo)
-                        }
+                    RepoReorderStack(repos: appState.actionsRepos, mode: .branches, isReordering: $isReordering) { repo, drag in
+                        BranchesRepoAccordion(repo: repo, drag: drag)
+                    } preview: { repo in
+                        BranchesRepoDragPreview(title: repo.actionsTitle)
                     }
-                    .padding(6)
                     .background(GeometryReader { proxy in
                         Color.clear.preference(key: SCMBodyHeightKey.self, value: proxy.size.height)
                     })
                 }
+                .scrollDisabled(isReordering)
                 .modifier(SCMBodyHeightFrame(measured: measuredBodyHeight, fill: appState.isExpanded))
                 .onPreferenceChange(SCMBodyHeightKey.self) { height in
                     measuredBodyHeight = height
@@ -48,9 +49,40 @@ struct BranchesSCMView: View {
     }
 }
 
+/// Floating repo header that follows the pointer while reordering.
+private struct BranchesRepoDragPreview: View {
+    let title: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "line.3.horizontal")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Color.accentColor)
+            Text(title)
+                .font(.system(size: 12, weight: .bold))
+                .lineLimit(1)
+            Spacer(minLength: 4)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color(nsColor: .windowBackgroundColor))
+                .shadow(color: .black.opacity(0.22), radius: 9, y: 4)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .strokeBorder(Color.accentColor.opacity(0.5), lineWidth: 1)
+        )
+        .frame(maxHeight: .infinity, alignment: .top)
+    }
+}
+
 private struct BranchesRepoAccordion: View {
     @Environment(AppState.self) private var appState
     let repo: WatchedRepo
+    let drag: RepoDragHandle
     @State private var visibleLimit = 10
 
     private var snapshot: RepoActionsSnapshot { appState.actionsSnapshots[repo.id] ?? .empty }
@@ -67,42 +99,66 @@ private struct BranchesRepoAccordion: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Button {
-                withAnimation(.easeInOut(duration: 0.12)) {
-                    appState.toggleRepoAccordion(repo.id, in: .branches)
+            HStack(spacing: 0) {
+                RepoDragGrip(handle: drag)
+                    .padding(.leading, 2)
+
+                Button {
+                    withAnimation(.easeInOut(duration: 0.12)) {
+                        appState.toggleRepoAccordion(repo.id, in: .branches)
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: isOpen ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 10)
+                        Text(repo.actionsTitle)
+                            .font(.system(size: 12, weight: .bold))
+                            .lineLimit(1)
+                        Spacer(minLength: 4)
+                        let activities = appState.branchActivities(for: repo, window: .all)
+                            .filter { !appState.isBranchHidden($0.branch, in: repo.id) }
+                        let running = activities.filter { $0.state == .running }.count
+                        let failed = activities.filter { $0.state == .failed }.count
+                        if running > 0 {
+                            countBadge(running, color: .orange, help: "\(running) branch\(running == 1 ? "" : "es") running CI/CD")
+                        }
+                        if failed > 0 {
+                            countBadge(failed, color: .red, help: "\(failed) branch\(failed == 1 ? "" : "es") with failed workflows")
+                        }
+                        if running == 0, failed == 0, !activities.isEmpty {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(.green)
+                                .help("No running or failed workflows")
+                        }
+                    }
+                    .padding(.leading, 2)
+                    .padding(.trailing, 4)
+                    .padding(.vertical, 8)
+                    .contentShape(Rectangle())
                 }
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: isOpen ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 10)
-                    Text(repo.actionsTitle)
-                        .font(.system(size: 12, weight: .bold))
-                        .lineLimit(1)
-                    Spacer(minLength: 4)
-                    let activities = appState.branchActivities(for: repo, window: .all)
-                        .filter { !appState.isBranchHidden($0.branch, in: repo.id) }
-                    let running = activities.filter { $0.state == .running }.count
-                    let failed = activities.filter { $0.state == .failed }.count
-                    if running > 0 {
-                        countBadge(running, color: .orange, help: "\(running) branch\(running == 1 ? "" : "es") running CI/CD")
+                .buttonStyle(PressableButtonStyle())
+                .disabled(drag.reorderActive)
+
+                if let remote = repo.githubRemote, let url = URL(string: remote.branchesURL) {
+                    Button {
+                        NSWorkspace.shared.open(url)
+                        AppDiagnostics.info(.appState, "default browser opened kind=allBranches repo=\(remote.slug)")
+                    } label: {
+                        Image(systemName: "link")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Color.accentColor)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 8)
+                            .contentShape(Rectangle())
                     }
-                    if failed > 0 {
-                        countBadge(failed, color: .red, help: "\(failed) branch\(failed == 1 ? "" : "es") with failed workflows")
-                    }
-                    if running == 0, failed == 0, !activities.isEmpty {
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(.green)
-                            .help("No running or failed workflows")
-                    }
+                    .buttonStyle(PressableButtonStyle())
+                    .help("Open \(remote.slug) · All branches on GitHub")
+                    .accessibilityLabel("Open \(repo.actionsTitle) branches on GitHub")
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-                .contentShape(Rectangle())
             }
-            .buttonStyle(PressableButtonStyle())
             .background(Color.primary.opacity(0.06))
             .contextMenu {
                 Button("Open all branches on GitHub") {
@@ -178,7 +234,7 @@ private struct BranchesRepoAccordion: View {
 
     private func logVisibleBranches(event: String) {
         AppDiagnostics.info(.appState,
-            "branches view event=\(event) repo=\(repo.actionsTitle) total=\(snapshot.branches.count) watched=\(visibleBranches.count) visible=\(isOpen ? min(visibleLimit, visibleBranches.count) : 0) limit=\(visibleLimit) open=\(isOpen) alternatingRows=false statusAlignment=top rowDividers=true runningBar=true divergenceGraph=true workflowPill=true mergedActions=true runs=\(snapshot.runs.count)")
+            "branches view event=\(event) repo=\(repo.actionsTitle) total=\(snapshot.branches.count) watched=\(visibleBranches.count) visible=\(isOpen ? min(visibleLimit, visibleBranches.count) : 0) limit=\(visibleLimit) open=\(isOpen) alternatingRows=false statusAlignment=top rowDividers=true runningBar=false divergenceGraph=true workflowPill=finishedOnly mergedActions=true runs=\(snapshot.runs.count)")
     }
 
     private func countBadge(_ count: Int, color: Color, help: String) -> some View {
@@ -199,8 +255,7 @@ private struct BranchesRepoAccordion: View {
     }
 }
 
-/// Line 1: branch name with the workflow pill and PR in fixed columns on the right.
-/// Line 2: commit age, with the behind|ahead graph underneath those columns.
+/// One line: branch name, then behind|ahead graph, workflow pill and PR in fixed columns.
 private struct WatchedBranchRow: View {
     @Environment(AppState.self) private var appState
     let branch: BranchInfo
@@ -233,6 +288,12 @@ private struct WatchedBranchRow: View {
 
                 Spacer(minLength: 0)
 
+                // Right-anchored, so graphs still line up; rows without one give the name the room.
+                if !branch.isDefault && branch.hasDivergence {
+                    DivergenceGraph(behind: branch.behind, ahead: branch.ahead, scale: divergenceScale)
+                        .frame(width: DivergenceGraph.width)
+                }
+
                 WorkflowStatusPill(state: checkState, completedCount: completedCount, expanded: completedExpanded)
                     .fixedSize()
                     .frame(width: 40, alignment: .trailing)
@@ -243,11 +304,6 @@ private struct WatchedBranchRow: View {
                     }
                 }
                 .frame(width: 60, alignment: .trailing)
-            }
-
-            if !branch.isDefault && branch.hasDivergence {
-                DivergenceGraph(behind: branch.behind, ahead: branch.ahead, scale: divergenceScale)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
             }
         }
         .padding(.leading, 8)
@@ -274,7 +330,7 @@ private struct WatchedBranchRow: View {
 }
 
 /// A branch with its running/failed runs always visible and completed runs behind the
-/// workflow pill. An orange bar on the leading edge marks branches with CI/CD in progress.
+/// workflow pill.
 private struct BranchWithActionsRow: View {
     @Environment(AppState.self) private var appState
     let branch: BranchInfo
@@ -288,7 +344,6 @@ private struct BranchWithActionsRow: View {
     private var expanded: Bool { appState.isBranchExpanded(activity.id) }
     private var completedRuns: [ActionRun] { runs.filter { !$0.isRunning && !$0.isFailed } }
     private var visibleRuns: [ActionRun] { activity.attentionRuns + (expanded ? completedRuns : []) }
-    private var isRunning: Bool { !activity.runningRuns.isEmpty }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -307,26 +362,10 @@ private struct BranchWithActionsRow: View {
                         RunLine(run: run, now: now)
                     }
                 }
-                .overlay(alignment: .leading) {
-                    Rectangle()
-                        .fill(Color.primary.opacity(0.14))
-                        .frame(width: 1)
-                        .padding(.leading, 15)
-                        .padding(.vertical, 4)
-                }
                 .padding(.bottom, 3)
             }
         }
         .padding(.vertical, 3)
-        .overlay(alignment: .leading) {
-            if isRunning {
-                Capsule()
-                    .fill(Color.orange)
-                    .frame(width: 3)
-                    .padding(.vertical, 6)
-                    .help("CI/CD running")
-            }
-        }
     }
 
     private func toggleCompleted() {
@@ -338,7 +377,7 @@ private struct BranchWithActionsRow: View {
 /// GitHub's branch-list divergence graph: behind | ahead around a centre rule, with
 /// grey bars scaled against the largest divergence in the visible list.
 private struct DivergenceGraph: View {
-    static let width: CGFloat = 92
+    static let width: CGFloat = 60
     let behind: Int
     let ahead: Int
     let scale: Int
@@ -361,7 +400,7 @@ private struct DivergenceGraph: View {
             Text("\(value)")
                 .font(.system(size: 10, weight: .medium).monospacedDigit())
                 .foregroundStyle(value == 0 ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.secondary))
-                .padding(.horizontal, 5)
+                .padding(.horizontal, 3)
             Rectangle()
                 .fill(Color.primary.opacity(0.13))
                 .frame(width: barWidth(value), height: 3)
@@ -375,15 +414,16 @@ private struct DivergenceGraph: View {
     }
 }
 
-/// Branch workflow status and completed-run count in one pill, tinted by state:
-/// orange running, red failed, green passed. Clicking the row reveals the runs.
+/// Branch result and completed-run count in one pill: green tick or red cross.
+/// Hidden while anything runs, because each running workflow already shows its own
+/// spinner beneath the branch. Clicking the row reveals the runs.
 private struct WorkflowStatusPill: View {
     let state: BranchCheckState
     let completedCount: Int
     let expanded: Bool
 
     var body: some View {
-        if state == .idle && completedCount == 0 {
+        if state == .running || (state == .idle && completedCount == 0) {
             EmptyView()
         } else {
             HStack(spacing: 3) {
