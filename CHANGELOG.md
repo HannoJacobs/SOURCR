@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.23
+
+- Removed the alternating grey backgrounds introduced in 1.22 at the owner's request. Every branch returns to the same resting background within its repository accordion, without zebra striping.
+- Kept the check status, behind/ahead counts, and pull-request badge vertically centred beside the branch name and timestamp. The alignment improvement from 1.22 remains in the compact branch layout.
+- Retained the existing pointer hover highlight on each branch row. A row highlights while hovered and returns to the shared resting appearance when the pointer leaves it.
+- Removed the stripe-parity input from branch rows and returned list rendering to direct branch identities. Hiding a branch or showing another page no longer computes or changes any alternating background state.
+- Preserved default-branch-first ordering and newest-commit ordering for the remaining branches. The initial ten-row limit and Show more pagination continue to operate separately for each watched repository.
+- Preserved Hide until updated and its persisted commit-head exclusions. Removing the visual striping does not change which branches are watched or when a hidden branch reappears after its head changes.
+- Preserved branch and pull-request links opening in the Mac's default browser, along with the Branches, Actions, Diff icon order. No repository, account, browser, or remote Git state is changed by this presentation update.
+- Updated current-feature documentation and installed-view diagnostics to report uniform branch backgrounds with centred status alignment. Advanced app version and build to 1.23 for the packaged and installed release.
+
 ## 1.22
 
 - Added alternating grey backgrounds to the Branches list so neighbouring branches are easier to distinguish when scanning a repository with many similarly named feature branches.

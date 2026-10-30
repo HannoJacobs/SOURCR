@@ -117,13 +117,12 @@ private struct BranchesRepoAccordion: View {
         } else {
             TimelineView(.periodic(from: .now, by: 60)) { context in
                 VStack(spacing: 2) {
-                    ForEach(Array(visibleBranches.prefix(visibleLimit).enumerated()), id: \.element.name) { index, branch in
+                    ForEach(Array(visibleBranches.prefix(visibleLimit)), id: \.name) { branch in
                         WatchedBranchRow(
                             branch: branch,
                             repoID: repo.id,
                             checkState: branch.checkState ?? .idle,
-                            now: context.date,
-                            shaded: index.isMultiple(of: 2) == false
+                            now: context.date
                         )
                     }
                     if visibleBranches.count > visibleLimit {
@@ -144,7 +143,7 @@ private struct BranchesRepoAccordion: View {
 
     private func logVisibleBranches(event: String) {
         AppDiagnostics.info(.appState,
-            "branches view event=\(event) repo=\(repo.actionsTitle) total=\(snapshot.branches.count) watched=\(visibleBranches.count) visible=\(isOpen ? min(visibleLimit, visibleBranches.count) : 0) limit=\(visibleLimit) open=\(isOpen) alternatingRows=true statusAlignment=center")
+            "branches view event=\(event) repo=\(repo.actionsTitle) total=\(snapshot.branches.count) watched=\(visibleBranches.count) visible=\(isOpen ? min(visibleLimit, visibleBranches.count) : 0) limit=\(visibleLimit) open=\(isOpen) alternatingRows=false statusAlignment=center")
     }
 
     private func message(_ text: String, color: Color) -> some View {
@@ -161,7 +160,6 @@ private struct WatchedBranchRow: View {
     let repoID: UUID
     let checkState: BranchCheckState
     let now: Date
-    let shaded: Bool
     @State private var hovered = false
 
     var body: some View {
@@ -217,7 +215,7 @@ private struct WatchedBranchRow: View {
         .padding(.horizontal, 7)
         .padding(.vertical, 6)
         .background(RoundedRectangle(cornerRadius: 5)
-            .fill(Color.primary.opacity((shaded ? 0.055 : 0) + (hovered ? 0.06 : 0))))
+            .fill(hovered ? Color.primary.opacity(0.06) : Color.clear))
         .onHover { hovered = $0 }
         .contextMenu {
             Button("Hide until updated") {
