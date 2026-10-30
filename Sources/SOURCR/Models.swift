@@ -167,15 +167,17 @@ struct SideBySideRow: Identifiable, Hashable {
 
 enum PanelMode: String, CaseIterable, Identifiable {
     case branches
-    case actions
     case diff
+
+    static func restored(from raw: String) -> PanelMode? {
+        PanelMode(rawValue: raw == "actions" ? "branches" : raw)
+    }
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .diff: return "Diff"
-        case .actions: return "Actions"
         case .branches: return "Branches"
         }
     }
@@ -183,7 +185,6 @@ enum PanelMode: String, CaseIterable, Identifiable {
     var symbolName: String {
         switch self {
         case .branches: return "arrow.triangle.branch"
-        case .actions: return "play.circle"
         case .diff: return "doc.text.magnifyingglass"
         }
     }

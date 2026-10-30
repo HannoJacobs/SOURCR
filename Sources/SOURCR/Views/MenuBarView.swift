@@ -34,11 +34,9 @@ struct MenuBarView: View {
     private var leftDetailPane: some View {
         switch appState.panelMode {
         case .branches:
-            EmptyView()
+            ActionsDetailPane()
         case .diff:
             DiffPane()
-        case .actions:
-            ActionsDetailPane()
         }
     }
 
@@ -55,8 +53,6 @@ struct MenuBarView: View {
                     BranchesSCMView()
                 case .diff:
                     VSCodeSCMView()
-                case .actions:
-                    ActionsSCMView()
                 }
             }
         }
@@ -89,7 +85,7 @@ struct MenuBarView: View {
                 HeaderIconButton(systemName: "gearshape", help: "Diff Settings") {
                     showingSettings = true
                 }
-            case .actions, .branches:
+            case .branches:
                 HeaderIconButton(
                     systemName: "arrow.clockwise",
                     help: "Refresh \(appState.panelMode.title)",
@@ -355,34 +351,5 @@ struct WrapToggle: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-    }
-}
-
-/// How recently a branch must have been touched to earn a place on the board.
-struct BranchWindowPicker: View {
-    @Environment(AppState.self) private var appState
-
-    var body: some View {
-        HStack(spacing: 0) {
-            ForEach(BranchActivityWindow.allCases) { window in
-                Button {
-                    appState.branchActivityWindow = window
-                } label: {
-                    Text(window.title)
-                        .font(.system(size: 10, weight: .medium))
-                        .lineLimit(1)
-                        .fixedSize()
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(appState.branchActivityWindow == window ? Color.accentColor.opacity(0.25) : Color.clear)
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(2)
-        .background(Color.primary.opacity(0.06))
-        .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 }

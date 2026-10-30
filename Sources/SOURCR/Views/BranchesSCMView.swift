@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// Read-only remote branch watch list, independent of the Actions activity window.
+/// Remote branches and their workflow activity in one read-only board.
 struct BranchesSCMView: View {
     @Environment(AppState.self) private var appState
     @State private var measuredBodyHeight: CGFloat = 0
@@ -56,7 +56,7 @@ private struct BranchesRepoAccordion: View {
     private var snapshot: RepoActionsSnapshot { appState.actionsSnapshots[repo.id] ?? .empty }
     private var isOpen: Bool { appState.isRepoAccordionOpen(repo.id, in: .branches) }
     private var visibleBranches: [BranchInfo] {
-        snapshot.branches
+        (snapshot.branches.isEmpty ? appState.branchActivities(for: repo, window: .all).map(\.branch) : snapshot.branches)
             .filter { !appState.isBranchHidden($0, in: repo.id) }
             .sorted {
                 if $0.isDefault != $1.isDefault { return $0.isDefault }
@@ -91,6 +91,16 @@ private struct BranchesRepoAccordion: View {
             }
             .buttonStyle(PressableButtonStyle())
             .background(Color.primary.opacity(0.06))
+            .contextMenu {
+                Button("Open all branches on GitHub") {
+                    if let urlString = repo.githubRemote?.branchesURL, let url = URL(string: urlString) {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                Button("Remove repository", role: .destructive) {
+                    appState.removeRepo(repo, from: .branches)
+                }
+            }
 
             if isOpen {
                 Divider()
@@ -103,6 +113,7 @@ private struct BranchesRepoAccordion: View {
             .strokeBorder(Color.primary.opacity(0.18), lineWidth: 1))
         .onAppear { logVisibleBranches(event: "appeared") }
         .onChange(of: isOpen) { _, _ in logVisibleBranches(event: "accordion") }
+        .onChange(of: snapshot.runs) { _, _ in logVisibleBranches(event: "workflows-updated") }
         .onChange(of: snapshot.branches) { _, _ in logVisibleBranches(event: "updated") }
     }
 
@@ -110,18 +121,20 @@ private struct BranchesRepoAccordion: View {
         if let error = snapshot.errorMessage {
             message(error, color: .red)
         }
-        if snapshot.branchesFetchedAt == nil {
+        if snapshot.branchesFetchedAt == nil && snapshot.runs.isEmpty {
             message(appState.isRefreshingActions ? "Loading branches…" : "Refresh to load branches", color: .secondary)
         } else if visibleBranches.isEmpty {
             message("No watched branches", color: .secondary)
         } else {
-            TimelineView(.periodic(from: .now, by: 60)) { context in
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                let activities = Dictionary(uniqueKeysWithValues: appState.branchActivities(for: repo, now: context.date, window: .all).map { ($0.branch.name, $0.runs) })
                 VStack(spacing: 2) {
                     ForEach(Array(visibleBranches.prefix(visibleLimit)), id: \.name) { branch in
-                        WatchedBranchRow(
+                        BranchWithActionsRow(
                             branch: branch,
                             repoID: repo.id,
-                            checkState: branch.checkState ?? .idle,
+                            runs: activities[branch.name] ?? [],
+                            hasWorkflowHistory: snapshot.runs.contains { $0.headBranch == branch.name },
                             now: context.date
                         )
                     }
@@ -143,7 +156,7 @@ private struct BranchesRepoAccordion: View {
 
     private func logVisibleBranches(event: String) {
         AppDiagnostics.info(.appState,
-            "branches view event=\(event) repo=\(repo.actionsTitle) total=\(snapshot.branches.count) watched=\(visibleBranches.count) visible=\(isOpen ? min(visibleLimit, visibleBranches.count) : 0) limit=\(visibleLimit) open=\(isOpen) alternatingRows=false statusAlignment=center")
+            "branches view event=\(event) repo=\(repo.actionsTitle) total=\(snapshot.branches.count) watched=\(visibleBranches.count) visible=\(isOpen ? min(visibleLimit, visibleBranches.count) : 0) limit=\(visibleLimit) open=\(isOpen) alternatingRows=false statusAlignment=center mergedActions=true runs=\(snapshot.runs.count)")
     }
 
     private func message(_ text: String, color: Color) -> some View {
@@ -229,5 +242,42 @@ private struct WatchedBranchRow: View {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated
         return formatter.localizedString(for: branch.lastCommitAt, relativeTo: now)
+    }
+}
+
+/// Keep branch links separate from the workflow disclosure and detail selection.
+private struct BranchWithActionsRow: View {
+    @Environment(AppState.self) private var appState
+    let branch: BranchInfo
+    let repoID: UUID
+    let runs: [ActionRun]
+    let hasWorkflowHistory: Bool
+    let now: Date
+
+    private var activity: BranchActivity { BranchActivity(repoID: repoID, branch: branch, runs: runs) }
+    private var expanded: Bool { appState.isBranchExpanded(activity.id) }
+    private var visibleRuns: [ActionRun] { expanded ? runs : activity.attentionRuns }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            WatchedBranchRow(branch: branch, repoID: repoID, checkState: hasWorkflowHistory ? activity.state : (branch.checkState ?? .idle), now: now)
+            if !runs.isEmpty {
+                Button {
+                    appState.toggleBranchExpanded(activity.id)
+                    AppDiagnostics.info(.appState, "combined workflows branch=\(branch.name) expanded=\(!expanded) count=\(runs.count)")
+                } label: {
+                    Label(expanded ? "Hide workflows" : "Show workflows (\(runs.count))",
+                          systemImage: expanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .padding(.leading, 7)
+                .padding(.bottom, 3)
+                ForEach(visibleRuns) { run in
+                    RunLine(run: run, now: now)
+                }
+            }
+        }
     }
 }

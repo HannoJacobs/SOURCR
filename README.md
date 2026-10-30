@@ -7,7 +7,7 @@ Menu bar icon
     └─ Anchored panel (right edge pinned to the status item)
          ├─ Diff pane (left, expands only when a file is selected)
          └─ SCM column (right, fixed width)
-              ├─ Header: Branches | Actions | Diff (icons) · Pin · Detach · Refresh · Add · Settings
+              ├─ Header: Branches | Diff (icons) · Pin · Detach · Refresh · Add · Settings
               ├─ Multi-repo accordion (drag grip to reorder)
               └─ Flat changes + untracked list (no footer; Quit lives in Settings)
 ```
@@ -15,27 +15,27 @@ Menu bar icon
 ## What it does
 
 - Lives in the menu bar (`LSUIElement`)
-- Watch local git repositories for **Diff** and GitHub repositories for **Branches and Actions** (shared GitHub list; separate from Diff)
+- Watch local git repositories for **Diff** and GitHub repositories for **Branches**, including workflow activity (separate GitHub list from Diff)
 - **Branches mode:** Pins the default branch first, then shows remote branches newest-commit first, ten per repository; **Show more** adds ten. Check status, divergence, and PR badges are vertically centred beside the branch name and timestamp. Each row links its branch and PR in the Mac’s default browser and shows last commit time, current-head checks, and behind/ahead counts against the default branch. Right-click **Hide until updated** to hide that commit locally; a changed branch head brings it back, including after relaunch.
-- The mode selector uses icons in **Branches → Actions → Diff** order, with tooltips and accessible labels.
+- The mode selector uses icons in **Branches → Diff** order, with tooltips and accessible labels.
 - **Diff mode:** Shows combined staged + dirty changes and untracked files on the **current branch**
 - Click a file to open a diff to the left (Inline or Side By Side); click again to collapse
-- **Actions mode:** Shows active remote branches, divergence, pull requests, and all active runs per branch/workflow, falling back to the latest completed attempt; GitHub links work without any local checkout
-- Add an Actions repository with its GitHub URL, SSH origin, or `owner/repo` in Actions Settings; the header’s Add button opens that form
-- Existing Actions folder watches convert to saved GitHub links once; if a folder was already removed, use its pencil button in Actions Settings to set the link
+- **Workflow activity:** Running and failed workflows appear below their branch; Show workflows reveals the remaining latest workflow results. Timers update live, and selecting a workflow opens its job and step detail.
+- Add a GitHub repository with its GitHub URL, SSH origin, or `owner/repo` in Branches Settings; the header’s Add button opens that form
+- Existing Actions folder watches convert to saved GitHub links once; if a folder was already removed, use its pencil button in Branches Settings to set the link
 - Click a workflow run to expand job/step detail to the left (same leftward expand as Diff); click again to collapse
 - Right-click any workflow run and choose **Remove** to permanently ignore that run in SOURCR. It disappears from the board and branch/repository health indicators, including after refresh or relaunch. GitHub history stays intact; new runs of that workflow still appear. Exclusions apply to the GitHub repository and run ID (including reruns of that ID), and survive removing and re-adding the repository. If every result is excluded, the branch is idle rather than reported as passing.
-- Actions repository headings use the GitHub repository name; a separate link button on each heading opens GitHub's **All branches** page
-- Settings manage local Diff repositories separately from the shared Branches/Actions GitHub list
+- Repository headings use the GitHub repository name; right-click a heading to open GitHub’s **All branches** page or remove the watch
+- Settings manage local Diff repositories separately from the Branches GitHub list
 - Defaults to Side By Side + Wrap; both live in Diff Settings
 - Follows system light / dark appearance
 - Opening the panel (or bringing it to the foreground) immediately refreshes Diff and Actions
 - While the panel is visible, Diff and Actions both refresh every ~10s (no manual Refresh needed to catch a finished CD)
 - Pin (next to Refresh) keeps the panel in front while you work in other apps; unpin restores normal click-away dismiss
-- Panel height follows open Diff/Actions content (up to a max) so collapsed repos don’t leave a tall empty window
+- Panel height follows open Diff/Branches content (up to a max) so collapsed repos don’t leave a tall empty window
 - Git/`gh` child processes drain pipes while running and time out (so a huge `git status -uall` or stuck `gh` cannot freeze refreshes until quit)
 - In-flight Diff/`gh` refreshes are allowed to finish after the panel hides, so a quick open/close cannot leave a stale dirty count on screen
-- Panel stays on the status-item’s display across Diff ↔ Actions resizes (does not follow `NSScreen.main` / focus to another monitor)
+- Panel stays on the status-item’s display across Diff ↔ Branches resizes (does not follow `NSScreen.main` / focus to another monitor)
 - A detached panel is always placed on a connected display: unplugging the monitor it sat on (or relaunching with a saved position from one) moves it onto the nearest remaining display
 
 ## What it never does
@@ -45,14 +45,14 @@ Menu bar icon
 - No commit / push / pull
 - No rewrite of working tree state
 
-Read-only by design: `GitService` only allows `status`, `diff`, `show`, `rev-parse`, `ls-files`, and `remote get-url`. Actions mode uses the `gh` CLI read-only (`run list` / `run view`).
+Read-only by design: `GitService` only allows `status`, `diff`, `show`, `rev-parse`, `ls-files`, and `remote get-url`. Workflow monitoring uses the `gh` CLI read-only (`run list` / `run view`).
 
 ## Requirements
 
 - macOS 14+
 - Xcode (for Release `.app` / DMG packaging)
 - `git` on `PATH` (`/usr/bin/git`)
-- GitHub CLI (`gh`) installed for Actions. Choose a GitHub account per repository in Actions Settings; SOURCR stores its own credential copy in Keychain.
+- GitHub CLI (`gh`) installed for Actions. Choose a GitHub account per repository in Branches Settings; SOURCR stores its own credential copy in Keychain.
 
 ## Develop
 
@@ -94,7 +94,7 @@ Launch evidence is written to:
 |---|---|
 | `SOURCRApp` / `SOURCRAppDelegate` | Accessory app + status-item wiring |
 | `StatusPanelController` | Anchored `NSPanel`, outside-click dismiss, leftward expand |
-| `AppState` | Watched repos, Diff/Actions mode, snapshots, selection, refresh, reorder |
+| `AppState` | Watched repos, Diff/Branches mode, snapshots, selection, refresh, reorder |
 | `ExternalProcess` | Shared temp-file + watchdog CLI runner for `git` / `gh` |
 | `GitService` | Read-only git CLI wrapper |
 | `GitHubActionsService` | Read-only `gh` Actions list/detail + remote URL parse |
@@ -114,7 +114,7 @@ Release app bundles and archives are kept in `build-release.noindex` so they do 
 
 ### GitHub accounts in SOURCR
 
-Actions Settings has a **GitHub account** picker beside the repository editor.
+Branches Settings has a **GitHub account** picker beside the repository editor.
 Choose an account when adding a repository, or use the pencil beside an existing
 watch to change its account. Watches created before 1.18 require an explicit
 selection. The binding persists in SOURCR preferences across relaunches and reboots.

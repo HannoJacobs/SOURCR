@@ -17,7 +17,6 @@ final class AppState {
     private static let panelDetachedKey = "sourcr.panelDetached"
     private static let branchWindowKey = "sourcr.branchActivityWindow"
     private static let diffCollapsedKey = "sourcr.diffCollapsedRepos"
-    private static let actionsCollapsedKey = "sourcr.actionsCollapsedRepos"
 
     /// Local SCM / Diff watch list.
     var diffRepos: [WatchedRepo] = []
@@ -121,9 +120,6 @@ final class AppState {
     var diffCollapsedRepoIDs: Set<UUID> = [] {
         didSet { persistCollapsedRepos(diffCollapsedRepoIDs, key: Self.diffCollapsedKey) }
     }
-    var actionsCollapsedRepoIDs: Set<UUID> = [] {
-        didSet { persistCollapsedRepos(actionsCollapsedRepoIDs, key: Self.actionsCollapsedKey) }
-    }
 
     var branchesCollapsedRepoIDs: Set<UUID> = [] {
         didSet { persistCollapsedRepos(branchesCollapsedRepoIDs, key: "sourcr.branchesCollapsedRepos") }
@@ -132,7 +128,6 @@ final class AppState {
     func isRepoAccordionOpen(_ repoID: UUID, in mode: PanelMode) -> Bool {
         switch mode {
         case .diff: return !diffCollapsedRepoIDs.contains(repoID)
-        case .actions: return !actionsCollapsedRepoIDs.contains(repoID)
         case .branches: return !branchesCollapsedRepoIDs.contains(repoID)
         }
     }
@@ -145,9 +140,6 @@ final class AppState {
         case .branches:
             if open { branchesCollapsedRepoIDs.remove(repoID) }
             else { branchesCollapsedRepoIDs.insert(repoID) }
-        case .actions:
-            if open { actionsCollapsedRepoIDs.remove(repoID) }
-            else { actionsCollapsedRepoIDs.insert(repoID) }
         }
     }
 
@@ -175,7 +167,7 @@ final class AppState {
     var activeRepos: [WatchedRepo] {
         switch panelMode {
         case .diff: return diffRepos
-        case .actions, .branches: return actionsRepos
+        case .branches: return actionsRepos
         }
     }
 
@@ -258,14 +250,14 @@ final class AppState {
     func repos(for mode: PanelMode) -> [WatchedRepo] {
         switch mode {
         case .diff: return diffRepos
-        case .actions, .branches: return actionsRepos
+        case .branches: return actionsRepos
         }
     }
 
     private func setRepos(_ repos: [WatchedRepo], for mode: PanelMode) {
         switch mode {
         case .diff: diffRepos = repos
-        case .actions, .branches: actionsRepos = repos
+        case .branches: actionsRepos = repos
         }
     }
 
@@ -274,7 +266,7 @@ final class AppState {
     }
 
     func isActionRunSelected(_ run: ActionRun) -> Bool {
-        panelMode == .actions && selectedActionRunID == run.id && isExpanded
+        panelMode == .branches && selectedActionRunID == run.id && isExpanded
     }
 
     let githubAccounts = GitHubAccounts()
@@ -319,7 +311,7 @@ final class AppState {
         diffViewMode = .sideBySide
         wordWrap = true
         if let raw = defaults.string(forKey: Self.panelModeKey),
-           let mode = PanelMode(rawValue: raw) {
+           let mode = PanelMode.restored(from: raw) {
             panelMode = mode
         }
         isPanelPinned = defaults.bool(forKey: Self.panelPinnedKey)
@@ -329,7 +321,6 @@ final class AppState {
             branchActivityWindow = window
         }
         diffCollapsedRepoIDs = loadCollapsedRepos(key: Self.diffCollapsedKey)
-        actionsCollapsedRepoIDs = loadCollapsedRepos(key: Self.actionsCollapsedKey)
         branchesCollapsedRepoIDs = loadCollapsedRepos(key: "sourcr.branchesCollapsedRepos")
         pruneCollapsedRepos()
         if selectedRepoID == nil {
@@ -358,9 +349,9 @@ final class AppState {
         let diffIDs = Set(diffRepos.map(\.id))
         let actionsIDs = Set(actionsRepos.map(\.id))
         let nextDiff = diffCollapsedRepoIDs.intersection(diffIDs)
-        let nextActions = actionsCollapsedRepoIDs.intersection(actionsIDs)
+        let nextActions = branchesCollapsedRepoIDs.intersection(actionsIDs)
         if nextDiff != diffCollapsedRepoIDs { diffCollapsedRepoIDs = nextDiff }
-        if nextActions != actionsCollapsedRepoIDs { actionsCollapsedRepoIDs = nextActions }
+        if nextActions != branchesCollapsedRepoIDs { branchesCollapsedRepoIDs = nextActions }
     }
 
     func saveRepos() {
@@ -496,7 +487,7 @@ final class AppState {
     func setPanelMode(_ mode: PanelMode) {
         guard mode != panelMode else { return }
         panelMode = mode
-        AppDiagnostics.info(.appState, "panel mode=\(mode.rawValue) tabs=branches,actions,diff")
+        AppDiagnostics.info(.appState, "panel mode=\(mode.rawValue) tabs=branches,diff")
         if let selectedRepoID,
            !activeRepos.contains(where: { $0.id == selectedRepoID }) {
             self.selectedRepoID = activeRepos.first?.id
@@ -537,7 +528,7 @@ final class AppState {
     }
 
     func selectActionRun(_ run: ActionRun) {
-        guard panelMode == .actions else { return }
+        guard panelMode == .branches else { return }
         selectedRepoID = run.repoID
 
         if selectedActionRunID == run.id && isExpanded {
@@ -572,7 +563,7 @@ final class AppState {
         actionDetailTask = nil
         clearActionPayload()
         actionDetailGeneration += 1
-        if panelMode == .actions {
+        if panelMode == .branches {
             collapseDetailIfNeeded()
         }
     }
@@ -868,7 +859,7 @@ final class AppState {
         guard !Task.isCancelled, generation == actionsRefreshGeneration else { return }
 
         // Detail only when Actions is the visible mode and a run is selected.
-        guard panelMode == .actions, let selected = selectedActionRun else { return }
+        guard panelMode == .branches, let selected = selectedActionRun else { return }
         await loadActionDetailAsync(for: selected)
     }
 
@@ -981,13 +972,13 @@ final class AppState {
     // MARK: - Branch board
 
     /// Branch rows for a repo, already filtered by the activity window and sorted.
-    func branchActivities(for repo: WatchedRepo, now: Date = Date()) -> [BranchActivity] {
+    func branchActivities(for repo: WatchedRepo, now: Date = Date(), window: BranchActivityWindow? = nil) -> [BranchActivity] {
         let snap = actionsSnapshots[repo.id] ?? .empty
         let remote = repo.githubRemote ?? snap.remote
         let excludedIDs = Set(snap.runs.filter { run in
             remote.map { actionRunExclusions.contains(run, remote: $0) } ?? false
         }.map(\.databaseId))
-        return snap.branchActivities(repoID: repo.id, window: branchActivityWindow, now: now, excludedRunIDs: excludedIDs)
+        return snap.branchActivities(repoID: repo.id, window: window ?? branchActivityWindow, now: now, excludedRunIDs: excludedIDs)
     }
 
     func removeActionRun(_ run: ActionRun) {

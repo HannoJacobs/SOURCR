@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.24
+
+- Combined GitHub Actions activity into the Branches view. Each watched repository now has one branch list containing branch metadata and its workflow activity, so checking divergence and investigating CI no longer requires switching between two boards.
+- Removed the separate Actions icon and view. The header now offers Branches followed by Diff, retaining icon tooltips and accessible names. Saved Actions selections migrate to Branches on launch while repository URLs, account bindings, and workflow exclusions remain available.
+- Running and failed workflows appear immediately beneath their branch with status icons and live elapsed durations. A Show workflows disclosure reveals the remaining latest workflow results, and Hide workflows returns to the compact attention-only display.
+- Kept workflow selection connected to the existing detail pane. Clicking a run opens its read-only job and step details to the left; selecting it again closes the detail pane, just as it did from the former Actions board.
+- Preserved per-run Remove exclusions in the combined list and its workflow status. Exclusions are applied after representative run selection so hiding a recent failure does not resurrect an older attempt of the same workflow.
+- Retained default-branch-first ordering, newest-commit ordering for other branches, ten-at-a-time Show more pagination, and Hide until updated. Branch and pull-request links continue to open through the Mac's default browser, and rows keep their uniform backgrounds and centred status badges.
+- Retained workflow-derived branch rows when GitHub branch metadata cannot be fetched, allowing available CI activity to remain inspectable during partial API failures. Repository heading context menus open all branches on GitHub or remove the local watch.
+- Removed the obsolete standalone board and activity-window controls from navigation and settings. Added a regression check for the two-mode order and migration from saved Actions mode, and advanced app version and build to 1.24 for packaging, publication, and installed verification.
+
 ## 1.23
 
 - Removed the alternating grey backgrounds introduced in 1.22 at the owner's request. Every branch returns to the same resting background within its repository accordion, without zebra striping.

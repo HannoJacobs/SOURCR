@@ -38,7 +38,7 @@ struct SettingsPanel: View {
                         if repos.isEmpty {
                             Text(mode == .diff
                                  ? "No Diff repositories yet."
-                                 : "No Actions repositories yet.")
+                                 : "No Branches repositories yet.")
                                 .foregroundStyle(.secondary)
                         } else {
                             ForEach(repos) { repo in
@@ -129,8 +129,8 @@ struct SettingsPanel: View {
                         Text(mode == .diff ? "Diff Repositories" : "GitHub Repositories")
                     } footer: {
                         Text(mode == .diff
-                             ? "These repos appear only in Diff. Branches and Actions share a separate list."
-                             : "Shared by Branches and Actions. Paste a repository URL or owner/repo; no local folder is needed.")
+                             ? "These repos appear only in Diff. Branches uses a separate GitHub list."
+                             : "Paste a repository URL or owner/repo; no local folder is needed.")
                     }
 
                     if mode != .diff {
@@ -167,17 +167,7 @@ struct SettingsPanel: View {
                                 }
                             }
                         }
-                        if mode == .actions {
-                        Section {
-                            LabeledContent("Show branches") {
-                                BranchWindowPicker()
-                            }
-                        } header: {
-                            Text("Board")
-                        } footer: {
-                            Text("Branches with no commits or runs inside this window are hidden — the board stays about what you are actually working on.")
-                        }
-                        }
+
                     }
 
                     if mode == .diff {
