@@ -16,7 +16,7 @@ Menu bar icon
 
 - Lives in the menu bar (`LSUIElement`)
 - Watch local git repositories for **Diff** and GitHub repositories for **Branches and Actions** (shared GitHub list; separate from Diff)
-- **Branches mode:** Pins the default branch first, then shows remote branches newest-commit first, ten per repository; **Show more** adds ten. Each row links its branch and PR in an attached browser and shows last commit time, current-head checks, and behind/ahead counts against the default branch. Right-click **Hide until updated** to hide that commit locally; a changed branch head brings it back, including after relaunch.
+- **Branches mode:** Pins the default branch first, then shows remote branches newest-commit first, ten per repository; **Show more** adds ten. Each row links its branch and PR in the Mac’s default browser and shows last commit time, current-head checks, and behind/ahead counts against the default branch. Right-click **Hide until updated** to hide that commit locally; a changed branch head brings it back, including after relaunch.
 - The mode selector uses icons in **Branches → Actions → Diff** order, with tooltips and accessible labels.
 - **Diff mode:** Shows combined staged + dirty changes and untracked files on the **current branch**
 - Click a file to open a diff to the left (Inline or Side By Side); click again to collapse
@@ -101,7 +101,7 @@ Launch evidence is written to:
 | `DiffParser` | Unified + side-by-side rendering model |
 | `VSCodeSCMView` | Right-column multi-repo SCM + drag reorder |
 | `ActionsSCMView` | Right-column Actions list (active runs or latest completed attempt per workflow) |
-| `BranchesSCMView` / `GitHubBrowserPane` | Branch overview and attached GitHub website browser |
+| `BranchesSCMView` | Remote branch overview with default-browser GitHub links |
 | `DiffPane` / `ActionsDetailPane` | Left-expand detail for file diffs or workflow steps |
 | `SettingsPanel` | Viewer controls (right column overlay) |
 
@@ -134,4 +134,4 @@ process environment. SOURCR never runs `gh auth login`, `gh auth switch`,
 it with the CLI. Missing or rejected credentials produce an error and never fall
 back to another account. External GitHub links still use the browser's own login.
 
-The attached browser uses its own persistent website session. Private GitHub pages require signing in there; API credentials are never inserted into web requests.
+Branch and pull-request links open in the Mac’s default browser, using its existing GitHub website session.

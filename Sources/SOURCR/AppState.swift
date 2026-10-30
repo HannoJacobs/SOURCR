@@ -193,7 +193,6 @@ final class AppState {
             UserDefaults.standard.set(panelMode.rawValue, forKey: Self.panelModeKey)
             // Pure UI flip — keep any in-flight Actions list poll (pinned Diff can
             // still watch a long CD). Drop only the detail payload for the other mode.
-            browserURL = nil
             collapseDetailIfNeeded()
             clearDiffPayload()
             clearActionPayload()
@@ -205,9 +204,6 @@ final class AppState {
 
     var actionsSnapshots: [UUID: RepoActionsSnapshot] = [:]
     var branchExclusions = BranchExclusions()
-    var browserRequestID = UUID()
-    var browserURL: URL?
-    var browserTitle = "GitHub"
 
     private var actionRunExclusions = ActionRunExclusions()
     var selectedActionRunID: String?
@@ -549,7 +545,6 @@ final class AppState {
             return
         }
 
-        browserURL = nil
         selectedActionRunID = run.id
         isExpanded = true
         selectedActionDetail = nil
@@ -560,7 +555,6 @@ final class AppState {
     }
 
     func clearSelection() {
-        browserURL = nil
         collapseDetailIfNeeded()
         clearDiffSelection()
         clearActionSelection()
@@ -1008,7 +1002,8 @@ final class AppState {
 
     func openPullRequest(_ pr: BranchPullRequest) {
         guard let url = URL(string: pr.url), !pr.url.isEmpty else { return }
-        openInBrowser(url, title: "PR #\(pr.number)")
+        NSWorkspace.shared.open(url)
+        AppDiagnostics.info(.appState, "default browser opened kind=pullRequest")
     }
 
     func openBranchOnGitHub(_ branch: BranchInfo, in repoID: UUID) {
@@ -1017,16 +1012,8 @@ final class AppState {
         let encoded = branch.name
             .addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? branch.name
         guard let url = URL(string: "https://github.com/\(slug)/tree/\(encoded)") else { return }
-        openInBrowser(url, title: branch.name)
-    }
-
-    func openInBrowser(_ url: URL, title: String) {
-        guard url.scheme == "https", url.host == "github.com" else { return }
-        browserRequestID = UUID()
-        browserTitle = title
-        browserURL = url
-        isExpanded = true
-        AppDiagnostics.info(.appState, "attached browser opened kind=\(url.path.contains("/pull/") ? "pullRequest" : "branch")")
+        NSWorkspace.shared.open(url)
+        AppDiagnostics.info(.appState, "default browser opened kind=branch")
     }
 
     func isBranchHidden(_ branch: BranchInfo, in repoID: UUID) -> Bool {

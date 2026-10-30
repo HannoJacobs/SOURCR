@@ -32,17 +32,13 @@ struct MenuBarView: View {
 
     @ViewBuilder
     private var leftDetailPane: some View {
-        if let url = appState.browserURL {
-            GitHubBrowserPane(url: url, title: appState.browserTitle, requestID: appState.browserRequestID)
-        } else {
-            switch appState.panelMode {
-            case .branches:
-                EmptyView()
-            case .diff:
-                DiffPane()
-            case .actions:
-                ActionsDetailPane()
-            }
+        switch appState.panelMode {
+        case .branches:
+            EmptyView()
+        case .diff:
+            DiffPane()
+        case .actions:
+            ActionsDetailPane()
         }
     }
 
