@@ -43,7 +43,7 @@ fi
 note "Installing dev build to $INSTALLED_APP_PATH"
 rm -rf "$INSTALLED_APP_PATH"
 ditto "$STAGING_APP_PATH" "$INSTALLED_APP_PATH"
-rm -rf "$STAGING_APP_PATH"
+prune_and_assert_single_install
 
 note "Launching $INSTALLED_APP_PATH"
 open "$INSTALLED_APP_PATH"

@@ -85,6 +85,22 @@ verify_verbose_changelog_entry() {
     note "CHANGELOG.md verbosity verified for version $version bullets=$bullet_count chars=$char_count"
 }
 
+# Spotlight must only ever offer the one installed SOURCR. A second copy anywhere it
+# indexes (a dev build, a mounted DMG, an old download) opens a stale version.
+# Removes the dev staging folder, then fails loudly rather than deleting unknown copies.
+prune_and_assert_single_install() {
+    rm -rf "$SCRIPT_DIR/build-dev.noindex"
+    require_file "$INSTALLED_APP_PATH"
+    local strays
+    strays="$(mdfind "kMDItemCFBundleIdentifier == '$BUNDLE_ID'" 2>/dev/null | grep -vxF "$INSTALLED_APP_PATH" || true)"
+    if [ -n "$strays" ]; then
+        printf 'Error: Other %s copies are visible to Spotlight and would open a stale build:\n%s\nRemove or eject them so only %s remains.\n' \
+            "$APP_BUNDLE" "$strays" "$INSTALLED_APP_PATH" >&2
+        exit 1
+    fi
+    note "Single installed copy verified: $INSTALLED_APP_PATH"
+}
+
 plist_value() {
     /usr/libexec/PlistBuddy -c "Print :$2" "$1"
 }

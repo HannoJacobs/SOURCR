@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.28
+
+- Made a single, current installation a hard release rule. AGENTS.md now has a One Installed Copy, Always Current section: /Applications/SOURCR.app is the only SOURCR on the Mac and always holds the newest build the owner has been shown, because SOURCR is launched from Spotlight.
+- Added prune_and_assert_single_install to the shared release helpers. It deletes the local dev staging folder and queries Spotlight by the com.hannojacobs.SOURCR bundle ID, failing the run if any SOURCR.app other than /Applications/SOURCR.app is visible.
+- install-release.sh now runs that check after its launch verification, so a full send cannot be reported complete while Spotlight could still open a stale copy such as an old dev build, a mounted DMG or a stray download.
+- run-dev.sh runs the same check after installing each local build over /Applications/SOURCR.app, so day-to-day iteration also keeps exactly one copy on disk where Spotlight can find it.
+- The check reports every stray path and asks for it to be removed or ejected instead of deleting unknown bundles automatically, keeping the safeguard from destroying anything it did not create.
+- Verified the safeguard both ways before release: a temporary SOURCR.app placed in an indexed folder made the check fail with its path, and removing it let the check pass against the installed app alone.
+- AGENTS.md also requires agents to run run-dev.sh after every change, never to show builds from .build, DerivedData or other folders, and to say plainly when /Applications holds an unreleased dev build rather than a shipped release.
+- No app behaviour changed in this release; Branches, Diff, GitHub account handling and the read-only guarantees are identical to 1.27. Advanced version and build to 1.28 for the packaged, published and installed verification.
+
 ## 1.27
 
 - Added a link icon at the far right of every Branches repository header. One click opens that repository's GitHub All branches page in the default browser, while the rest of the header still expands and collapses the repository.

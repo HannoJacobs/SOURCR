@@ -29,6 +29,16 @@ Required verification evidence for a full send:
 
 Do not call something a full send if it only compiles, only ships a commit, only pushes code, only uploads a DMG, or only assumes GitHub/Pages/release propagation happened without verifying the live state.
 
+## One Installed Copy, Always Current
+
+Hanno launches SOURCR from Spotlight, so `/Applications/SOURCR.app` must be the only SOURCR on this Mac and must always be the newest build he has been shown.
+
+- After every change, run `./run-dev.sh` without being asked. It builds the working tree, installs it over `/Applications/SOURCR.app`, relaunches it and opens the panel. Never run a build from anywhere else (`.build/`, `build-dev.noindex/`, Xcode DerivedData) for Hanno to look at.
+- A full send replaces that dev install with the Release build through `./install-release.sh`.
+- Both scripts call `prune_and_assert_single_install` (in `release-common.sh`). It deletes the dev staging folder and fails if Spotlight (`mdfind` on the bundle ID) can see any other `SOURCR.app`. Treat that failure as a blocker: remove or eject the stray copy, never bypass the check.
+- Release archives stay in `build-release.noindex/`, which Spotlight ignores. Never copy an app bundle to a Spotlight-indexed location other than `/Applications`.
+- Changes shown to Hanno are not shipped until a full send. Do not describe dev installs as released; say plainly when `/Applications` holds an unreleased dev build.
+
 ## GitHub Identity
 
 This repo belongs to the **personal** account `HannoJacobs`, never the Healthbridge

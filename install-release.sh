@@ -69,5 +69,7 @@ done
 note "Launch verification evidence"
 grep -En "applicationDidFinishLaunching .*version=$expected_version .*build=$expected_build .*bundlePath=$INSTALLED_APP_PATH" "$LATEST_LOG_PATH"
 
+prune_and_assert_single_install
+
 echo "Installed app verified at $INSTALLED_APP_PATH"
 echo "Log evidence: $LATEST_LOG_PATH"
