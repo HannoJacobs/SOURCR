@@ -196,6 +196,7 @@ final class AppState {
 
     var actionsSnapshots: [UUID: RepoActionsSnapshot] = [:]
     var branchExclusions = BranchExclusions()
+    var pullRequestExclusions = PullRequestExclusions()
 
     private var actionRunExclusions = ActionRunExclusions()
     var selectedActionRunID: String?
@@ -1005,6 +1006,11 @@ final class AppState {
         guard let url = URL(string: "https://github.com/\(slug)/tree/\(encoded)") else { return }
         NSWorkspace.shared.open(url)
         AppDiagnostics.info(.appState, "default browser opened kind=branch")
+    }
+
+    func hidePullRequest(_ pr: BranchPullRequest) {
+        pullRequestExclusions.hide(pr)
+        AppDiagnostics.info(.appState, "pull request hidden until updated number=\(pr.number) hidden=\(pullRequestExclusions.contains(pr))")
     }
 
     func isBranchHidden(_ branch: BranchInfo, in repoID: UUID) -> Bool {

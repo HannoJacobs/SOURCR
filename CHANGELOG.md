@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.25
+
+- Put running and failed workflow rows directly beneath their branch, before any disclosure control. The normal branch view immediately exposes activity that needs attention, using the same representative-run selection and live timers as the former Actions board.
+- Changed the optional disclosure to Show completed workflows, with a count of only the remaining finished results. Expanding it adds successful, cancelled, skipped, and other completed results without duplicating the running or failed rows already on screen.
+- Removed the generic Show workflows wording and its position above active results. Branches without additional completed workflows have no extra disclosure button, while each visible run continues to open its job and step details with a single click.
+- Added Hide until updated to the context menu on every pull-request badge. Dismissing an old closed PR removes only its badge from SOURCR, leaving its branch, checks, divergence, and workflow activity available for inspection.
+- Persisted dismissed PR revisions using the GitHub pull-request URL and an observed revision fingerprint. The same PR stays hidden after refresh, relaunch, or watch recreation, and a different PR number or repository remains independently visible.
+- Extended read-only PR metadata with GitHub's updated timestamp and head commit ID. A remote update, head change, title edit, or state change makes a dismissed badge eligible to appear again, without modifying or deleting the pull request on GitHub.
+- Added focused persistence and reappearance coverage for unchanged PRs, changed timestamps, new heads, renamed titles, reopened PRs, distinct repository URLs, and different pull-request numbers. Retained the existing branch, workflow exclusion, and mode-migration checks.
+- Preserved the two-icon Branches and Diff header, default-branch-first ordering, branch pagination, browser links, uniform row backgrounds, and read-only repository behavior. Advanced the application version and build to 1.25 for the packaged release and installed verification.
+
 ## 1.24
 
 - Combined GitHub Actions activity into the Branches view. Each watched repository now has one branch list containing branch metadata and its workflow activity, so checking divergence and investigating CI no longer requires switching between two boards.

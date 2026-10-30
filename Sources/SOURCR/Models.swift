@@ -443,6 +443,23 @@ struct BranchPullRequest: Hashable {
     let title: String
     let url: String
     let state: PullRequestState
+    let updatedAt: String?
+    let headOID: String?
+
+    init(number: Int, title: String, url: String, state: PullRequestState,
+         updatedAt: String? = nil, headOID: String? = nil) {
+        self.number = number
+        self.title = title
+        self.url = url
+        self.state = state
+        self.updatedAt = updatedAt
+        self.headOID = headOID
+    }
+
+    var exclusionRevision: String {
+        let values = [title, String(describing: state), updatedAt ?? "", headOID ?? ""]
+        return values.map { "\($0.utf8.count):\($0)" }.joined()
+    }
 }
 
 /// Remote branch metadata for the current head commit and its most recent PR.

@@ -123,6 +123,10 @@ struct PullRequestPill: View {
         }
         .buttonStyle(PressableButtonStyle())
         .onHover { isHovered = $0 }
+        .contextMenu {
+            Button("Hide until updated") { appState.hidePullRequest(pullRequest) }
+                .help("Hide this PR badge in SOURCR until the pull request changes")
+        }
         .help("\(pullRequest.state.label) #\(pullRequest.number) — \(pullRequest.title)\nClick to open on GitHub")
     }
 }

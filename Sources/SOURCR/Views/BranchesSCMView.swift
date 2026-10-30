@@ -219,7 +219,7 @@ private struct WatchedBranchRow: View {
                         .foregroundStyle(.tertiary)
                         .help("Behind/ahead unavailable")
                 }
-                if let pr = branch.pullRequest {
+                if let pr = branch.pullRequest, !appState.pullRequestExclusions.contains(pr) {
                     PullRequestPill(pullRequest: pr)
                 }
             }
@@ -256,26 +256,31 @@ private struct BranchWithActionsRow: View {
 
     private var activity: BranchActivity { BranchActivity(repoID: repoID, branch: branch, runs: runs) }
     private var expanded: Bool { appState.isBranchExpanded(activity.id) }
-    private var visibleRuns: [ActionRun] { expanded ? runs : activity.attentionRuns }
+    private var completedRuns: [ActionRun] { runs.filter { !$0.isRunning && !$0.isFailed } }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 1) {
             WatchedBranchRow(branch: branch, repoID: repoID, checkState: hasWorkflowHistory ? activity.state : (branch.checkState ?? .idle), now: now)
-            if !runs.isEmpty {
+            ForEach(activity.attentionRuns) { run in
+                RunLine(run: run, now: now)
+            }
+            if !completedRuns.isEmpty {
                 Button {
                     appState.toggleBranchExpanded(activity.id)
-                    AppDiagnostics.info(.appState, "combined workflows branch=\(branch.name) expanded=\(!expanded) count=\(runs.count)")
+                    AppDiagnostics.info(.appState, "completed workflows branch=\(branch.name) expanded=\(expanded) count=\(completedRuns.count)")
                 } label: {
-                    Label(expanded ? "Hide workflows" : "Show workflows (\(runs.count))",
+                    Label(expanded ? "Hide completed workflows" : "Show completed workflows (\(completedRuns.count))",
                           systemImage: expanded ? "chevron.down" : "chevron.right")
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
                 .padding(.leading, 7)
-                .padding(.bottom, 3)
-                ForEach(visibleRuns) { run in
-                    RunLine(run: run, now: now)
+                .padding(.vertical, 3)
+                if expanded {
+                    ForEach(completedRuns) { run in
+                        RunLine(run: run, now: now)
+                    }
                 }
             }
         }
