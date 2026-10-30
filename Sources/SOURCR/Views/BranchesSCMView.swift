@@ -117,12 +117,13 @@ private struct BranchesRepoAccordion: View {
         } else {
             TimelineView(.periodic(from: .now, by: 60)) { context in
                 VStack(spacing: 2) {
-                    ForEach(Array(visibleBranches.prefix(visibleLimit)), id: \.name) { branch in
+                    ForEach(Array(visibleBranches.prefix(visibleLimit).enumerated()), id: \.element.name) { index, branch in
                         WatchedBranchRow(
                             branch: branch,
                             repoID: repo.id,
                             checkState: branch.checkState ?? .idle,
-                            now: context.date
+                            now: context.date,
+                            shaded: index.isMultiple(of: 2) == false
                         )
                     }
                     if visibleBranches.count > visibleLimit {
@@ -143,7 +144,7 @@ private struct BranchesRepoAccordion: View {
 
     private func logVisibleBranches(event: String) {
         AppDiagnostics.info(.appState,
-            "branches view event=\(event) repo=\(repo.actionsTitle) total=\(snapshot.branches.count) watched=\(visibleBranches.count) visible=\(isOpen ? min(visibleLimit, visibleBranches.count) : 0) limit=\(visibleLimit) open=\(isOpen)")
+            "branches view event=\(event) repo=\(repo.actionsTitle) total=\(snapshot.branches.count) watched=\(visibleBranches.count) visible=\(isOpen ? min(visibleLimit, visibleBranches.count) : 0) limit=\(visibleLimit) open=\(isOpen) alternatingRows=true statusAlignment=center")
     }
 
     private func message(_ text: String, color: Color) -> some View {
@@ -160,38 +161,42 @@ private struct WatchedBranchRow: View {
     let repoID: UUID
     let checkState: BranchCheckState
     let now: Date
+    let shaded: Bool
     @State private var hovered = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Button {
-                appState.openBranchOnGitHub(branch, in: repoID)
-            } label: {
-                HStack(spacing: 5) {
-                    Text(branch.name)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Color.accentColor)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    if branch.isDefault {
-                        Text("Default")
-                            .font(.system(size: 9))
-                            .foregroundStyle(.secondary)
+        HStack(alignment: .center, spacing: 7) {
+            VStack(alignment: .leading, spacing: 5) {
+                Button {
+                    appState.openBranchOnGitHub(branch, in: repoID)
+                } label: {
+                    HStack(spacing: 5) {
+                        Text(branch.name)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(Color.accentColor)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        if branch.isDefault {
+                            Text("Default")
+                                .font(.system(size: 9))
+                                .foregroundStyle(.secondary)
+                        }
                     }
-                    Spacer(minLength: 0)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(PressableButtonStyle())
-            .help("Open \(branch.name) on GitHub")
-            .accessibilityLabel("Open branch \(branch.name)")
+                .buttonStyle(PressableButtonStyle())
+                .help("Open \(branch.name) on GitHub")
+                .accessibilityLabel("Open branch \(branch.name)")
 
-            HStack(spacing: 7) {
                 Text(relativeUpdatedAt)
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                     .help("Last commit: \(branch.lastCommitAt.formatted())")
-                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            HStack(spacing: 7) {
                 BranchStateIcon(state: checkState)
                     .frame(width: 12, height: 12)
                     .help("Check status")
@@ -207,11 +212,12 @@ private struct WatchedBranchRow: View {
                     PullRequestPill(pullRequest: pr)
                 }
             }
+            .fixedSize()
         }
         .padding(.horizontal, 7)
         .padding(.vertical, 6)
         .background(RoundedRectangle(cornerRadius: 5)
-            .fill(hovered ? Color.primary.opacity(0.06) : Color.clear))
+            .fill(Color.primary.opacity((shaded ? 0.055 : 0) + (hovered ? 0.06 : 0))))
         .onHover { hovered = $0 }
         .contextMenu {
             Button("Hide until updated") {

@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.22
+
+- Added alternating grey backgrounds to the Branches list so neighbouring branches are easier to distinguish when scanning a repository with many similarly named feature branches.
+- Applied the shading to the complete branch row, including its name, last-commit timestamp, check status, behind/ahead counts, and pull-request badge. The two text lines now read as one visual unit.
+- Moved the check status, divergence counts, and pull-request badge into a vertically centred trailing group beside the branch name and timestamp, rather than aligning the group only with the timestamp line.
+- Kept the name and timestamp in a leading text column. Long branch names truncate in the middle while the trailing status group keeps its natural width and remains readable within SOURCR's compact panel.
+- Used an appearance-adaptive neutral tint for the alternating background. Hover feedback adds a separate highlight so both shaded and unshaded branches continue to acknowledge pointer movement.
+- Computed stripe parity from the visible branch order within each repository. Hiding a branch or revealing another page maintains alternating rows without leaving shading attached to old branch identities.
+- Retained default-branch-first ordering, ten-at-a-time pagination, Hide until updated, and branch and PR links opening in the Mac's default browser. This release changes presentation rather than remote branch state.
+- Added installed-view diagnostics for alternating rows and centred status alignment. Advanced version and build metadata to 1.22 for the Release app, packaged DMG, GitHub release, and installed application.
+
 ## 1.21
 
 - Added a dedicated Branches view alongside Actions and Diff so remote branch inventory can be checked across the watched GitHub repositories without leaving SOURCR. Branches and Actions use the same saved repository and account bindings.

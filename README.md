@@ -16,7 +16,7 @@ Menu bar icon
 
 - Lives in the menu bar (`LSUIElement`)
 - Watch local git repositories for **Diff** and GitHub repositories for **Branches and Actions** (shared GitHub list; separate from Diff)
-- **Branches mode:** Pins the default branch first, then shows remote branches newest-commit first, ten per repository; **Show more** adds ten. Each row links its branch and PR in the Mac’s default browser and shows last commit time, current-head checks, and behind/ahead counts against the default branch. Right-click **Hide until updated** to hide that commit locally; a changed branch head brings it back, including after relaunch.
+- **Branches mode:** Pins the default branch first, then shows remote branches newest-commit first, ten per repository; **Show more** adds ten. Alternating grey rows separate branches, with check status, divergence, and PR badges vertically centred beside the branch name and timestamp. Each row links its branch and PR in the Mac’s default browser and shows last commit time, current-head checks, and behind/ahead counts against the default branch. Right-click **Hide until updated** to hide that commit locally; a changed branch head brings it back, including after relaunch.
 - The mode selector uses icons in **Branches → Actions → Diff** order, with tooltips and accessible labels.
 - **Diff mode:** Shows combined staged + dirty changes and untracked files on the **current branch**
 - Click a file to open a diff to the left (Inline or Side By Side); click again to collapse
