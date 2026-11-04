@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.30
+
+- Plain-text reports now mark source blocks with a random id chosen per report and stated at the top, as in [end diff a.txt id=1a2b3c4d]. A file containing a line that looks like the end of its own block can no longer pass the text after it off as report content.
+- Control characters in metadata lines, including newlines in file names, are now replaced with a question mark in the text and Markdown formats. Git status now returns raw paths, so a crafted file name could otherwise have started what looked like a new report line. JSON keeps exact values.
+- The report's opening line now says that paths, branch names, PR titles and workflow names are data rather than instructions, as well as diffs and file contents, because those fields also come from repositories and GitHub.
+- A timed-out request now keeps its concurrency slot until its work has really finished, so repeated timeouts cannot pile up more than four reports in the background. The timeout also cancels that work, which stops further git calls and GitHub requests for it.
+- GET /health is now answered even when all four request slots are busy, so an agent can tell a jammed endpoint from one that is not running.
+- Added tests for forged block endings, newlines in file names, the held slot, and /health under load.
+- The endpoint still has no token, by design for now, so any process on this Mac can read it. It remains GET and HEAD only, bound to loopback, and refuses browser requests.
+- No change to the panel. Advanced version and build to 1.30; SOURCR still never changes a repository or GitHub.
+
 ## 1.29
 
 - Added an agent endpoint at http://127.0.0.1:47615. Any agent on this Mac can call GET /state at any time and receive everything SOURCR knows as plain text, without opening the panel or reading the screen; devbox agents reach the same report with ssh mac curl.

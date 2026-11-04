@@ -195,7 +195,8 @@ final class AgentEndpointServer: @unchecked Sendable {
             send(rejection, to: connection, omitBody: omitBody)
             return
         }
-        guard inFlight < Self.maxConcurrentRequests else {
+        // /health stays answerable when the slots are full, so a jam can be diagnosed.
+        guard inFlight < Self.maxConcurrentRequests || request.path == "/health" else {
             send(.text("Busy: \(Self.maxConcurrentRequests) requests are already running. Retry shortly.\n", status: 503,
                        extraHeaders: ["Retry-After": "1"]), to: connection, omitBody: omitBody)
             return
@@ -204,20 +205,25 @@ final class AgentEndpointServer: @unchecked Sendable {
         let handler = self.handler
         // A panel-hidden accessory app is a prime App Nap candidate; do not let it slow a reply.
         let activity = ProcessInfo.processInfo.beginActivity(options: .userInitiated, reason: "SOURCR agent endpoint request")
-        // Whichever comes first answers: a stuck dependency must not hold its slot for good.
+        // Whichever comes first answers. The slot stays held until the work really ends,
+        // so timed-out requests cannot pile up past the limit; a timeout also cancels it.
         var isAnswered = false
         let answer: @Sendable (AgentHTTPResponse) -> Void = { [self] response in
-            queue.async {
-                guard !isAnswered else { return }
-                isAnswered = true
+            guard !isAnswered else { return }
+            isAnswered = true
+            send(response, to: connection, omitBody: omitBody)
+        }
+        let work = Task.detached { [self] in
+            let response = await handler(request)
+            queue.async { [self] in
                 ProcessInfo.processInfo.endActivity(activity)
                 inFlight -= 1
-                send(response, to: connection, omitBody: omitBody)
+                answer(response)
             }
         }
-        Task.detached { answer(await handler(request)) }
         queue.asyncAfter(deadline: .now() + requestDeadline) {
             answer(.text("Timed out building the report.\n", status: 504))
+            work.cancel()
         }
     }
 

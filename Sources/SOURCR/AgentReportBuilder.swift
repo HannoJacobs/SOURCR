@@ -197,7 +197,7 @@ final class AgentReportBuilder {
     private nonisolated static func loadFile(_ entry: GitFileEntry, repoPath: String, options: AgentReportOptions, budget: inout ReportBudget) -> AgentReport.File {
         var file = AgentReport.File(path: entry.path, oldPath: entry.oldPath, status: entry.changeType.rawValue)
         guard options.includeDiffs else { return file }
-        guard budget.files > 0, budget.bytes > 0, Date() < budget.deadline else {
+        guard budget.files > 0, budget.bytes > 0, Date() < budget.deadline, !Task.isCancelled else {
             file.note = "Source omitted: this repository's report limit was reached; \(fullHint)."
             return file
         }

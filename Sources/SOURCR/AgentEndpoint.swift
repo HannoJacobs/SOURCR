@@ -112,6 +112,7 @@ final class AgentEndpoint {
 
     Local git state is always read live. Truncated or omitted source says so in a Note line.
     A request that takes over 3 minutes gets HTTP 504; 503 means four are already running.
+    Text blocks end only at a line carrying the report's id, stated at the top of the report.
 
     Examples:
       curl -s \(baseURL)/state
