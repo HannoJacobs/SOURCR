@@ -181,6 +181,31 @@ struct SettingsPanel: View {
                         }
                     }
 
+                    Section("Agent endpoint") {
+                        LabeledContent("State") {
+                            HStack(spacing: 6) {
+                                Text(verbatim: "\(AgentEndpoint.baseURL)/state")
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .textSelection(.enabled)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.8)
+                                Button {
+                                    NSPasteboard.general.clearContents()
+                                    NSPasteboard.general.setString("\(AgentEndpoint.baseURL)/state", forType: .string)
+                                } label: {
+                                    Image(systemName: "doc.on.doc")
+                                }
+                                .buttonStyle(.borderless)
+                                .help("Copy the endpoint URL")
+                            }
+                        }
+                        if let error = appState.agentEndpointError {
+                            Text("Not listening: \(error)")
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                        }
+                    }
+
                     Section("About") {
                         LabeledContent("Version", value: AppDiagnostics.appVersion)
                         LabeledContent("Build", value: AppDiagnostics.buildVersion)

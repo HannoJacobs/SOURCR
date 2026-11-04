@@ -88,13 +88,7 @@ private struct BranchesRepoAccordion: View {
     private var snapshot: RepoActionsSnapshot { appState.actionsSnapshots[repo.id] ?? .empty }
     private var isOpen: Bool { appState.isRepoAccordionOpen(repo.id, in: .branches) }
     private var visibleBranches: [BranchInfo] {
-        (snapshot.branches.isEmpty ? appState.branchActivities(for: repo, window: .all).map(\.branch) : snapshot.branches)
-            .filter { !appState.isBranchHidden($0, in: repo.id) }
-            .sorted {
-                if $0.isDefault != $1.isDefault { return $0.isDefault }
-                if $0.lastCommitAt != $1.lastCommitAt { return $0.lastCommitAt > $1.lastCommitAt }
-                return $0.name < $1.name
-            }
+        appState.boardBranchSource(for: repo).filter { appState.isBranchOnBoard($0, in: repo.id) }
     }
 
     var body: some View {
@@ -118,7 +112,7 @@ private struct BranchesRepoAccordion: View {
                             .lineLimit(1)
                         Spacer(minLength: 4)
                         let activities = appState.branchActivities(for: repo, window: .all)
-                            .filter { !appState.isBranchHidden($0.branch, in: repo.id) }
+                            .filter { appState.isBranchOnBoard($0.branch, in: repo.id) }
                         let running = activities.filter { $0.state == .running }.count
                         let failed = activities.filter { $0.state == .failed }.count
                         if running > 0 {
@@ -234,7 +228,7 @@ private struct BranchesRepoAccordion: View {
 
     private func logVisibleBranches(event: String) {
         AppDiagnostics.info(.appState,
-            "branches view event=\(event) repo=\(repo.actionsTitle) total=\(snapshot.branches.count) watched=\(visibleBranches.count) visible=\(isOpen ? min(visibleLimit, visibleBranches.count) : 0) limit=\(visibleLimit) open=\(isOpen) alternatingRows=false statusAlignment=top rowDividers=true runningBar=false divergenceGraph=true workflowPill=finishedOnly mergedActions=true runs=\(snapshot.runs.count)")
+            "branches view event=\(event) repo=\(repo.actionsTitle) total=\(snapshot.branches.count) watched=\(visibleBranches.count) visible=\(isOpen ? min(visibleLimit, visibleBranches.count) : 0) limit=\(visibleLimit) open=\(isOpen) alternatingRows=false statusAlignment=top rowDividers=true runningBar=false divergenceGraph=true workflowPill=finishedOnly mergedActions=true mergedHidden=\((snapshot.branches.filter(\.isMergedAtHead).count)) runs=\(snapshot.runs.count)")
     }
 
     private func countBadge(_ count: Int, color: Color, help: String) -> some View {

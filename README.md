@@ -16,7 +16,7 @@ Menu bar icon
 
 - Lives in the menu bar (`LSUIElement`)
 - Watch local git repositories for **Diff** and GitHub repositories for **Branches**, including workflow activity (separate GitHub list from Diff)
-- **Branches mode:** Pins the default branch first, then shows remote branches newest-commit first, ten per repository; **Show more** adds ten. Each row shows the branch name (truncated at the end) with a workflow pill and PR badge in fixed columns, and a GitHub-style behind | ahead graph against the default branch beneath them. Rows are separated by dividers. The link icon at the right of each repository header opens its All branches page on GitHub. Right-click a branch to open it on GitHub or **Hide until updated** to hide that commit locally; a changed branch head brings it back, including after relaunch.
+- **Branches mode:** Pins the default branch first, then shows remote branches newest-commit first, ten per repository; **Show more** adds ten. Each row shows the branch name (truncated at the end) with a workflow pill and PR badge in fixed columns, and a GitHub-style behind | ahead graph against the default branch beneath them. Rows are separated by dividers. The link icon at the right of each repository header opens its All branches page on GitHub. Right-click a branch to open it on GitHub or **Hide until updated** to hide that commit locally; a changed branch head brings it back, including after relaunch. Branches whose PR is merged (purple) are hidden automatically; pushing a new commit to one brings it back.
 - **Workflow pill:** once every workflow on a branch has finished, one pill shows a green tick or red cross with the number of completed workflows. While anything is running the pill is hidden; each running workflow shows its own orange spinner beneath the branch. Repository headers show orange running / red failed counts or a green tick.
 - Right-click a PR badge and choose **Hide until updated** to dismiss that observed PR revision locally. The badge returns when the PR changes; GitHub is never modified.
 - The mode selector uses icons in **Branches → Diff** order, with tooltips and accessible labels.
@@ -41,6 +41,33 @@ Menu bar icon
 - Panel stays on the status-item’s display across Diff ↔ Branches resizes (does not follow `NSScreen.main` / focus to another monitor)
 - A detached panel is always placed on a connected display: unplugging the monitor it sat on (or relaunching with a saved position from one) moves it onto the nearest remaining display
 
+## Agent endpoint
+
+While SOURCR runs, any agent on this Mac can read everything the app knows, whenever it likes and whether or not the panel is open:
+
+```bash
+curl -s http://127.0.0.1:47615/state                 # plain text
+curl -s http://127.0.0.1:47615/state.md              # Markdown
+curl -s http://127.0.0.1:47615/state.json            # JSON, every field
+curl -s http://127.0.0.1:47615/help                  # usage, for the agent itself
+ssh mac curl -s http://127.0.0.1:47615/state         # from devbox
+```
+
+The report opens with a summary of what needs attention, then covers each watched Diff repository (branch, head, changed and untracked files, full diffs and untracked file contents), each watched GitHub repository (every branch with divergence, PR, check state and workflow runs, with jobs and steps for running and failed runs) and the panel's own state. Branches the panel hides stay listed, marked merged or hidden until updated. Unlike the panel, the report does not page branches ten at a time; like the panel, its runs come from each repository's newest 50.
+
+| Option | Effect |
+|---|---|
+| `view=all\|diff\|branches` | Only part of the report |
+| `repo=TEXT` | Only repositories whose name, path or owner/repo contains TEXT |
+| `diffs=0` | File lists without diffs or contents |
+| `refresh=live\|cached\|force` | `live` (default): GitHub data at most 10s old, branch metadata at most 45s. `cached`: never contact GitHub. `force`: fetch everything now |
+| `full=1` | Lift the size limits (200 KB per file; 2 MB, 300 files and 30s of git per repository; 25 run details) and add jobs for every run |
+| `format=text\|md\|json` | Alternative to the path suffix |
+
+Local git state is always read live. A truncated or omitted file says so in a `Note:` line, and failures appear in the report rather than failing the request. A narrowed report states its scope, and its summary covers only that scope. HTTP 503 means four requests are already running; 504 means one took over three minutes.
+
+It is GET and HEAD only and cannot change anything. The port binds to loopback, so other machines cannot reach it directly; requests from web pages are refused by checking `Host`, `Origin` and `Sec-Fetch-Site`, so a browser tab cannot read your source. Git runs with your global ignore rules and without taking `.git/index.lock`, so ignored secrets stay out and polling cannot fail a concurrent commit. There is no token: any process running on this Mac can read uncommitted changes in your Diff repositories, including a secrets file that no ignore rule covers. Settings shows the URL, and a red message if another process holds the port.
+
 ## What it never does
 
 - No branch switching
@@ -48,7 +75,7 @@ Menu bar icon
 - No commit / push / pull
 - No rewrite of working tree state
 
-Read-only by design: `GitService` only allows `status`, `diff`, `show`, `rev-parse`, `ls-files`, and `remote get-url`. Workflow monitoring uses the `gh` CLI read-only (`run list` / `run view`).
+Read-only by design: `GitService` only allows `status`, `diff`, `show`, `rev-parse`, `ls-files`, and `remote get-url`. Workflow monitoring uses the `gh` CLI read-only (`run list` / `run view`). The agent endpoint serves GET and HEAD only.
 
 ## Requirements
 
@@ -108,6 +135,10 @@ Launch evidence is written to:
 | `BranchesSCMView` | Remote branch overview with default-browser GitHub links |
 | `DiffPane` / `ActionsDetailPane` | Left-expand detail for file diffs or workflow steps |
 | `SettingsPanel` | Viewer controls (right column overlay) |
+| `AgentEndpointServer` | Loopback HTTP server and request guards |
+| `AgentEndpoint` | Routes `/state`, `/health` and `/help` |
+| `AgentReportBuilder` | Collects live git and AppState data into one report |
+| `AgentReport` | The report model and its text, Markdown and JSON renderers |
 
 ## Notes
 

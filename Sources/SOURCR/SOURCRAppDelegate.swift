@@ -3,6 +3,7 @@ import AppKit
 final class SOURCRAppDelegate: NSObject, NSApplicationDelegate {
     private var appState: AppState?
     private var panelController: StatusPanelController?
+    private var agentEndpoint: AgentEndpoint?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Stay a menu-bar app by default; temporarily flipped to .regular only
@@ -22,6 +23,10 @@ final class SOURCRAppDelegate: NSObject, NSApplicationDelegate {
         state.onPanelLayoutChange = { [weak controller] in
             controller?.syncPanelSize()
         }
+
+        let endpoint = AgentEndpoint(appState: state)
+        endpoint.start()
+        self.agentEndpoint = endpoint
 
         AppDiagnostics.info(
             .lifecycle,

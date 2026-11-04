@@ -492,6 +492,14 @@ struct BranchInfo: Hashable {
         self.headOID = headOID
         self.checkState = checkState
     }
+
+    /// The PR for this exact head is merged, so its code already lives in the base branch.
+    /// A later push moves the head past the merged commit and brings the branch back.
+    var isMergedAtHead: Bool {
+        guard !isDefault, let pr = pullRequest, pr.state == .merged else { return false }
+        guard let prHead = pr.headOID, !prHead.isEmpty, !headOID.isEmpty else { return true }
+        return prHead == headOID
+    }
 }
 
 /// Collapsed check state for a branch — the only four states worth a glance.

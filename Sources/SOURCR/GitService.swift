@@ -60,7 +60,8 @@ enum GitService {
         // Git still honors .gitignore, so ignored trees aren't walked.
         let status = try run(
             in: repoPath,
-            ["status", "--porcelain=v1", "-b", "-uall", "--ignore-submodules=dirty"]
+            // -z: raw paths, because the default C-quotes any with a space or non-ASCII byte.
+            ["status", "--porcelain=v1", "-z", "-b", "-uall", "--ignore-submodules=dirty"]
         )
         let fingerprint = String(status.hashValue)
         let (branch, changes, untracked) = parseStatusWithBranch(status)
@@ -89,7 +90,7 @@ enum GitService {
         switch entry.kind {
         case .changed, .staged, .unstaged:
             // Combined working tree vs HEAD (staged + unstaged in one diff).
-            let text = try run(in: repoPath, ["diff", "HEAD", "--no-color", "--", entry.path])
+            let text = try run(in: repoPath, diffArguments(entry))
             return DiffParser.parse(path: entry.path, unifiedDiff: text)
         case .untracked:
             let fullPath = (repoPath as NSString).appendingPathComponent(entry.path)
@@ -98,6 +99,19 @@ enum GitService {
         case .unchanged:
             return .empty(path: entry.path)
         }
+    }
+
+    /// Git's own unified diff against HEAD, before parsing it into rows for the panel.
+    static func rawDiff(repoPath: String, entry: GitFileEntry, maxBytes: Int) throws -> CappedOutput {
+        try translatingErrors(diffArguments(entry), timeout: commandTimeout) {
+            try ExternalProcess.runCapped(executable: gitPath, arguments: diffArguments(entry), currentDirectory: repoPath,
+                                          environment: environment, timeout: commandTimeout, maxBytes: maxBytes)
+        }
+    }
+
+    /// A rename names both paths, so git shows the rename instead of a whole-file addition.
+    private static func diffArguments(_ entry: GitFileEntry) -> [String] {
+        ["diff", "HEAD", "--no-color", "--no-ext-diff", "--"] + [entry.oldPath, entry.path].compactMap { $0 }
     }
 
     // MARK: - Private
@@ -120,8 +134,8 @@ enum GitService {
         var byPath: [String: GitFileEntry] = [:]
         var untracked: [GitFileEntry] = []
 
-        for rawLine in output.split(separator: "\n", omittingEmptySubsequences: true) {
-            let line = String(rawLine)
+        var records = output.split(separator: "\0", omittingEmptySubsequences: true).map(String.init)[...]
+        while let line = records.popFirst() {
             if line.hasPrefix("## ") {
                 // ## main...origin/main [ahead 1]
                 let rest = String(line.dropFirst(3))
@@ -136,14 +150,16 @@ enum GitService {
             guard line.count >= 3 else { continue }
             let x = line[line.startIndex]
             let y = line[line.index(after: line.startIndex)]
-            let rest = String(line.dropFirst(3))
+            let path = String(line.dropFirst(3))
 
             if x == "?" && y == "?" {
-                untracked.append(GitFileEntry(path: rest, kind: .untracked, changeType: .untracked, oldPath: nil))
+                untracked.append(GitFileEntry(path: path, kind: .untracked, changeType: .untracked, oldPath: nil))
                 continue
             }
 
-            let (path, oldPath) = parsePath(rest)
+            // With -z a rename or copy is two records: new path, then the old one.
+            let isRename = "RC".contains(x) || "RC".contains(y)
+            let oldPath = isRename ? records.popFirst() : nil
             let code = (y != " " && y != "?") ? y : x
             let type = changeType(for: code)
 
@@ -167,16 +183,6 @@ enum GitService {
         }
 
         return (branch, Array(byPath.values), untracked)
-    }
-
-    private static func parsePath(_ rest: String) -> (String, String?) {
-        if rest.contains(" -> ") {
-            let parts = rest.components(separatedBy: " -> ")
-            if parts.count == 2 {
-                return (parts[1], parts[0])
-            }
-        }
-        return (rest, nil)
     }
 
     private static func changeType(for code: Character) -> GitChangeType {
@@ -205,19 +211,35 @@ enum GitService {
             throw GitCommandError.invalidOutput("Blocked non-readonly git subcommand: \(head)")
         }
 
-        do {
-            return try ExternalProcess.run(
-                executable: "/usr/bin/git",
+        return try translatingErrors(arguments, timeout: timeout) {
+            try ExternalProcess.run(
+                executable: gitPath,
                 arguments: arguments,
                 currentDirectory: workingDirectory,
-                environment: [
-                    "PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin",
-                    "GIT_PAGER": "cat",
-                    "GIT_TERMINAL_PROMPT": "0",
-                    "LC_ALL": "C"
-                ],
+                environment: environment,
                 timeout: timeout
             )
+        }
+    }
+
+    private static let gitPath = "/usr/bin/git"
+
+    private static let environment: [String: String] = [
+        "PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin",
+        // Without HOME git skips the global ignore file and lists ignored secrets as untracked.
+        "HOME": NSHomeDirectory(),
+        // Keep status from taking .git/index.lock, which fails a concurrent commit.
+        "GIT_OPTIONAL_LOCKS": "0",
+        // A file really named `[x].txt` must not be read as a glob.
+        "GIT_LITERAL_PATHSPECS": "1",
+        "GIT_PAGER": "cat",
+        "GIT_TERMINAL_PROMPT": "0",
+        "LC_ALL": "C"
+    ]
+
+    private static func translatingErrors<Output>(_ arguments: [String], timeout: TimeInterval, _ body: () throws -> Output) throws -> Output {
+        do {
+            return try body()
         } catch ExternalProcessError.timedOut(let seconds) {
             throw GitCommandError.timedOut(command: arguments, timeout: seconds)
         } catch ExternalProcessError.failed(let status, let stderr) {

@@ -80,6 +80,8 @@ the shim, so a caller that deliberately chose an identity is left alone.
 
 SOURCR is a **read-only** diff viewer. Agents must never add git-mutating capabilities (commit, push, checkout, branch switch, stage, unstage, stash, reset, clean, rebase, merge). Displaying the current branch name is fine; changing it is not.
 
+Serving state is fine and is what the agent endpoint does: it stays GET/HEAD-only on loopback with its `Host`, `Origin` and `Sec-Fetch-Site` checks. Anything the panel gains should appear in `AgentReport` too, so `/state` keeps matching the app.
+
 ## Debug Research First
 
 For sticky debugging issues, Swift/macOS platform behavior, codesigning, MenuBarExtra hit-testing, or anything that smells like a system/framework edge case, spend significant time searching the web for relevant context before attempting to debug.

@@ -206,6 +206,8 @@ final class AppState {
     var selectedActionDetail: ActionRunDetail?
     var isLoadingActionDetail = false
     var isRefreshingActions = false
+    /// Why the agent endpoint is not listening; nil while it is healthy.
+    var agentEndpointError: String?
 
     @ObservationIgnored var onPanelClose: (() -> Void)?
     @ObservationIgnored var onPanelLayoutChange: (() -> Void)?
@@ -610,12 +612,32 @@ final class AppState {
         actionsRefreshTask?.cancel()
         actionsRefreshGeneration += 1
         let generation = actionsRefreshGeneration
+        // Set before the task runs, so a second caller joins it instead of cancelling it unstarted.
+        isRefreshingActions = true
         actionsRefreshTask = Task { @MainActor in
             await refreshActionsAllAsync(generation: generation, forceBranches: forceBranches)
             if generation == self.actionsRefreshGeneration {
                 self.actionsRefreshTask = nil
             }
         }
+    }
+
+    /// Same-age bound as the panel's visible poll: repeat callers share one fetch.
+    private static let agentRunsMaxAge: TimeInterval = 10
+
+    /// Brings GitHub data up to date for a caller that needs the answer now, even while the
+    /// panel is hidden and polling is off. Joins an in-flight refresh instead of stacking one.
+    func refreshActionsForAgents(force: Bool) async {
+        if let inFlight = actionsRefreshTask, isRefreshingActions {
+            await inFlight.value
+            guard force else { return }
+        } else if !force, actionsRepos.allSatisfy({ repo in
+            actionsSnapshots[repo.id]?.fetchedAt.map { Date().timeIntervalSince($0) < Self.agentRunsMaxAge } ?? false
+        }) {
+            return
+        }
+        refreshActions(forceBranches: force)
+        await actionsRefreshTask?.value
     }
 
     /// Cancel only debounced FSEvents probes (panel hide). In-flight refreshes keep going.
@@ -978,11 +1000,31 @@ final class AppState {
     /// Branch rows for a repo, already filtered by the activity window and sorted.
     func branchActivities(for repo: WatchedRepo, now: Date = Date(), window: BranchActivityWindow? = nil) -> [BranchActivity] {
         let snap = actionsSnapshots[repo.id] ?? .empty
+        return snap.branchActivities(repoID: repo.id, window: window ?? branchActivityWindow, now: now, excludedRunIDs: excludedRunIDs(for: repo))
+    }
+
+    func excludedRunIDs(for repo: WatchedRepo) -> Set<Int> {
+        let snap = actionsSnapshots[repo.id] ?? .empty
         let remote = repo.githubRemote ?? snap.remote
-        let excludedIDs = Set(snap.runs.filter { run in
+        return Set(snap.runs.filter { run in
             remote.map { actionRunExclusions.contains(run, remote: $0) } ?? false
         }.map(\.databaseId))
-        return snap.branchActivities(repoID: repo.id, window: window ?? branchActivityWindow, now: now, excludedRunIDs: excludedIDs)
+    }
+
+    /// Every known branch in board order, including hidden ones.
+    func boardBranchSource(for repo: WatchedRepo) -> [BranchInfo] {
+        let snapshot = actionsSnapshots[repo.id] ?? .empty
+        return (snapshot.branches.isEmpty ? branchActivities(for: repo, window: .all).map(\.branch) : snapshot.branches)
+            .sorted {
+                if $0.isDefault != $1.isDefault { return $0.isDefault }
+                if $0.lastCommitAt != $1.lastCommitAt { return $0.lastCommitAt > $1.lastCommitAt }
+                return $0.name < $1.name
+            }
+    }
+
+    /// The single rule for whether a branch earns a row and counts towards the repository header.
+    func isBranchOnBoard(_ branch: BranchInfo, in repoID: UUID) -> Bool {
+        !branch.isMergedAtHead && !isBranchHidden(branch, in: repoID)
     }
 
     func removeActionRun(_ run: ActionRun) {
