@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.37
+
+- Made both vertical scrollbars in PR review permanent: the changed-file directory and the continuous diff document each retain their own visible scrollbar, including while the mouse is elsewhere.
+- Switched these two panes to the native legacy scroller style. AppKit reserves a dedicated gutter beside the clip view, so the scrollbar track and thumb no longer float over filenames, line numbers or changed code.
+- Disabled automatic scroller hiding for these panes. A file list or document that fits inside its viewport still keeps the gutter instead of changing its content width as files load or folders collapse.
+- Kept scrolling vertical because PR code is always wrapped. No horizontal track is added, and the existing file-tree width and draggable divider continue to determine the space given to each pane.
+- Applied the scroller policy only to the two PR scroll views through a native view inside their content. Other SOURCR scroll views and the Mac's system scrollbar preference retain their existing behavior.
+- Reapply the pane policy when macOS announces a preferred-scroller-style change, so changing pointing devices or scrollbar preferences does not turn these specific scrollbars into transient overlays.
+- Preserved the continuous all-file document, click-to-file navigation, scroll-linked highlight, folder disclosure, filename search, screen-capped resizing and click-away dismissal. Agent reports identify the permanent-gutter scrollbar policy as well.
+- Added a native layout check for both long and short documents that verifies the visible scrollbar has positive width and does not intersect the content clip view. Runtime diagnostics record attachment of the permanent-gutter policy; advanced version and build to 1.37.
+
 ## 1.36
 
 - Reduced the PR file-tree sidebar's default width from 320 to approximately 213 points, two-thirds of its previous width. The divider remains draggable, and reopening the review restores that narrower default.

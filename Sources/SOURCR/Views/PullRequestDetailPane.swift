@@ -114,7 +114,9 @@ struct PullRequestDetailPane: View {
                 }
                 .scrollTargetLayout()
                 .padding(.horizontal, 6).padding(.bottom, 8)
+                .background(PRScrollbars())
             }
+            .scrollIndicators(.visible)
             .scrollPosition(id: $sidebarPosition, anchor: .center)
             .onAppear { sidebarPosition = appState.selectedPullRequestFile }
             .onChange(of: appState.selectedPullRequestFile) {
@@ -188,7 +190,9 @@ struct PullRequestDetailPane: View {
                     .scrollTargetLayout()
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.bottom, 28)
+                    .background(PRScrollbars())
                 }
+                .scrollIndicators(.visible)
                 .modifier(PRDiffScrollObservation(tracker: scrollTracker))
                 .background(PRDiffViewportMarker(tracker: scrollTracker))
                 .accessibilityLabel("All PR file diffs")
