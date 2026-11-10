@@ -24,6 +24,8 @@ struct PanelDragHandle: NSViewRepresentable {
     let onEnded: () -> Void
     /// Double-click toggles detach/reattach, the way a title bar zooms.
     let onDoubleClick: () -> Void
+    var cursor: NSCursor = .openHand
+    var fillsHeight = false
 
     func makeNSView(context: Context) -> PanelDragHandleView {
         let view = PanelDragHandleView()
@@ -40,6 +42,8 @@ struct PanelDragHandle: NSViewRepresentable {
         view.onChanged = onChanged
         view.onEnded = onEnded
         view.onDoubleClick = onDoubleClick
+        view.dragCursor = cursor
+        view.fillsHeight = fillsHeight
     }
 }
 
@@ -48,6 +52,16 @@ final class PanelDragHandleView: NSView {
     var onChanged: ((CGSize) -> Void)?
     var onEnded: (() -> Void)?
     var onDoubleClick: (() -> Void)?
+    var dragCursor: NSCursor = .openHand {
+        didSet {
+            if oldValue !== dragCursor { window?.invalidateCursorRects(for: self) }
+        }
+    }
+    var fillsHeight = false {
+        didSet {
+            if oldValue != fillsHeight { invalidateIntrinsicContentSize() }
+        }
+    }
 
     /// Cursor position at mouse-down, in screen space. `nil` when not dragging.
     private var dragAnchor: NSPoint?
@@ -57,7 +71,8 @@ final class PanelDragHandleView: NSView {
     /// made the window taller, stranding the list in the middle of a blank band.
     /// Flexible across, fixed down.
     override var intrinsicContentSize: NSSize {
-        NSSize(width: NSView.noIntrinsicMetric, height: PanelDragHandleView.handleHeight)
+        NSSize(width: NSView.noIntrinsicMetric,
+               height: fillsHeight ? NSView.noIntrinsicMetric : Self.handleHeight)
     }
 
     static let handleHeight: CGFloat = 26
@@ -66,7 +81,7 @@ final class PanelDragHandleView: NSView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func resetCursorRects() {
-        addCursorRect(bounds, cursor: .openHand)
+        addCursorRect(visibleRect, cursor: dragCursor)
     }
 
     override func mouseDown(with event: NSEvent) {

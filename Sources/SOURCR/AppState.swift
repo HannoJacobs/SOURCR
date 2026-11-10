@@ -205,7 +205,8 @@ final class AppState {
     var pullRequestFiles: [PullRequestFile] = []
     var collapsedPullRequestFolders: Set<String> = []
     var pullRequestFileFilter = ""
-    var pullRequestSidebarWidth: CGFloat = 320
+    static let defaultPRSidebarWidth: CGFloat = 320.0 * 2 / 3
+    var pullRequestSidebarWidth: CGFloat = defaultPRSidebarWidth
     var selectedPullRequestFile: String?
     var pullRequestDocument: [PRDiffDocumentRow] = []
     var pullRequestScrollRequest = 0
@@ -1144,7 +1145,7 @@ final class AppState {
         pullRequestFiles = []
         collapsedPullRequestFolders = []
         pullRequestFileFilter = ""
-        pullRequestSidebarWidth = 320
+        pullRequestSidebarWidth = Self.defaultPRSidebarWidth
         selectedPullRequestFile = nil
         pullRequestDocument = []
         pullRequestScrollRequest = 0

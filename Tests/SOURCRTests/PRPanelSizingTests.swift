@@ -31,7 +31,7 @@ struct PRPanelSizingTests {
         state.isPanelPinned = true
         state.selectedPullRequest = BranchPullRequest(number: 1, title: "PR", url: "https://github.com/example/repo/pull/1", state: .draft)
         state.isExpanded = true
-        #expect(state.pullRequestSidebarWidth == 320)
+        #expect(state.pullRequestSidebarWidth == 320.0 * 2 / 3)
         #expect(state.requestedPRSize == CGSize(width: 1080, height: 975))
         state.togglePRSize()
         #expect(state.requestedPRSize == CGSize(width: 2160, height: 1950))

@@ -4,7 +4,8 @@ import SwiftUI
 struct PullRequestDetailPane: View {
     @Environment(AppState.self) private var appState
     @State private var sidebarDragStart: CGFloat?
-    @State private var visibleDiffRow: PRDiffDocumentRow.ScrollTarget?
+    @State private var sidebarDividerHovered = false
+    @State private var scrollTracker = PRDiffScrollTracker()
     @State private var sidebarPosition: String?
     var resizeActions = PanelDragActions()
     private var treeRows: [PullRequestFileTree.Row] {
@@ -30,18 +31,27 @@ struct PullRequestDetailPane: View {
                 GeometryReader { geometry in
                     HStack(spacing: 0) {
                         fileList.frame(width: min(appState.pullRequestSidebarWidth, max(160, geometry.size.width - 280)))
-                        Rectangle()
-                            .fill(Color.primary.opacity(0.12))
-                            .frame(width: 1)
-                            .padding(.horizontal, 2)
-                            .contentShape(Rectangle())
-                            .gesture(DragGesture(minimumDistance: 1)
-                                .onChanged { value in
-                                    if sidebarDragStart == nil { sidebarDragStart = appState.pullRequestSidebarWidth }
-                                    appState.pullRequestSidebarWidth = min(max(180, (sidebarDragStart ?? 320) + value.translation.width),
-                                                       min(440, max(180, geometry.size.width - 280)))
-                                }
-                                .onEnded { _ in sidebarDragStart = nil })
+                        PanelDragHandle(
+                            onBegan: { sidebarDragStart = appState.pullRequestSidebarWidth },
+                            onChanged: { delta in
+                                appState.pullRequestSidebarWidth = min(
+                                    max(180, (sidebarDragStart ?? AppState.defaultPRSidebarWidth) + delta.width),
+                                    min(440, max(180, geometry.size.width - 280)))
+                            },
+                            onEnded: { sidebarDragStart = nil },
+                            onDoubleClick: { appState.pullRequestSidebarWidth = AppState.defaultPRSidebarWidth },
+                            cursor: .resizeLeftRight, fillsHeight: true)
+                            .frame(width: 9)
+                            .frame(maxHeight: .infinity)
+                            .background(sidebarDividerHovered ? Color.accentColor.opacity(0.12) : .clear)
+                            .overlay {
+                                Rectangle()
+                                    .fill(sidebarDividerHovered ? Color.accentColor : Color.primary.opacity(0.12))
+                                    .frame(width: 1)
+                                    .allowsHitTesting(false)
+                            }
+                            .onHover { sidebarDividerHovered = $0 }
+                            .help("Drag to resize file sidebar · double-click to restore default width")
                             .accessibilityLabel("Resize file sidebar")
                         diffContent.frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
@@ -49,6 +59,12 @@ struct PullRequestDetailPane: View {
             }
         }
         .background(SCMTheme.diffBackground)
+        .onAppear {
+            let state = appState
+            scrollTracker.onVisibleFile = { [weak state] in state?.trackVisiblePullRequestFile($0) }
+            scrollTracker.start()
+        }
+        .onDisappear { scrollTracker.stop() }
         .onChange(of: appState.pullRequestFileFilter) { appState.collapsedPullRequestFolders = [] }
         .overlay(alignment: appState.pullRequestOpensRight ? .bottomTrailing : .bottomLeading) {
             PanelDragHandle(onBegan: resizeActions.began, onChanged: resizeActions.changed,
@@ -154,8 +170,8 @@ struct PullRequestDetailPane: View {
             ScrollViewReader { proxy in
                 ScrollView(.vertical) {
                     LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(appState.pullRequestDocument) { row in
-                            Group {
+                        ForEach(appState.pullRequestDocument, id: \.scrollTarget) { row in
+                            VStack(alignment: .leading, spacing: 0) {
                             switch row {
                             case .file(let file):
                                 fileHeader(file)
@@ -166,25 +182,21 @@ struct PullRequestDetailPane: View {
                                 InlineDiffRow(line: line, wordWrap: true, containerWidth: geometry.size.width)
                             }
                             }
-                            .id(row.scrollTarget)
+                            .background(PRDiffRowMarker(path: row.filePath, tracker: scrollTracker))
                         }
                     }
                     .scrollTargetLayout()
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.bottom, 28)
                 }
-                .scrollPosition(id: $visibleDiffRow, anchor: .top)
+                .modifier(PRDiffScrollObservation(tracker: scrollTracker))
+                .background(PRDiffViewportMarker(tracker: scrollTracker))
                 .accessibilityLabel("All PR file diffs")
-                .onChange(of: visibleDiffRow) {
-                    if let target = visibleDiffRow {
-                        appState.trackVisiblePullRequestFile(target.path)
-                    }
-                }
                 .onChange(of: appState.pullRequestScrollRequest) {
                     if let path = appState.pullRequestScrollTarget {
                         let target = PRDiffDocumentRow.ScrollTarget.file(path)
-                        visibleDiffRow = target
                         proxy.scrollTo(target, anchor: .top)
+                        scrollTracker.scheduleUpdate()
                     }
                 }
             }
