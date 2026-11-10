@@ -96,6 +96,7 @@ struct PullRequestPill: View {
     let pullRequest: BranchPullRequest
 
     @State private var isHovered = false
+    private var isSelected: Bool { appState.isExpanded && appState.selectedPullRequest?.url == pullRequest.url }
 
     var body: some View {
         Button {
@@ -114,11 +115,11 @@ struct PullRequestPill: View {
             .padding(.vertical, 1)
             .background(
                 RoundedRectangle(cornerRadius: 4)
-                    .fill(pullRequest.state.tint.opacity(isHovered ? 0.22 : 0.12))
+                    .fill(isSelected ? Color.accentColor.opacity(0.22) : pullRequest.state.tint.opacity(isHovered ? 0.22 : 0.12))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 4)
-                    .strokeBorder(pullRequest.state.tint.opacity(isHovered ? 0.6 : 0.3), lineWidth: 1)
+                    .strokeBorder(isSelected ? Color.accentColor : pullRequest.state.tint.opacity(isHovered ? 0.6 : 0.3), lineWidth: 1)
             )
             .contentShape(Rectangle())
         }
@@ -131,6 +132,7 @@ struct PullRequestPill: View {
             Button("Hide until updated") { appState.hidePullRequest(pullRequest) }
                 .help("Hide this PR badge in SOURCR until the pull request changes")
         }
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
         .help("\(pullRequest.state.label) #\(pullRequest.number) — \(pullRequest.title)\nClick to review files in SOURCR")
     }
 }

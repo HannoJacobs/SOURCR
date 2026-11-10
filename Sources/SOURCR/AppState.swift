@@ -102,13 +102,14 @@ final class AppState {
 
     /// Window height for the anchored panel (content-fit, capped; taller when detail open).
     var panelHeight: CGFloat {
+        if selectedPullRequest != nil { return requestedPRSize.height }
         let body: CGFloat = scmBodyHeight > 1
             ? min(scmBodyHeight, SOURCRLayout.maxBodyHeight)
             : SOURCRLayout.emptyBodyHeight
         let fitted = SOURCRLayout.chromeHeight + body
         let clamped = min(SOURCRLayout.maxPanelHeight, max(SOURCRLayout.minPanelHeight, fitted))
         if isExpanded {
-            return max(clamped, selectedPullRequest == nil ? SOURCRLayout.minExpandedPanelHeight : 650)
+            return max(clamped, SOURCRLayout.minExpandedPanelHeight)
         }
         return clamped
     }
@@ -203,9 +204,29 @@ final class AppState {
     var pullRequestFiles: [PullRequestFile] = []
     var collapsedPullRequestFolders: Set<String> = []
     var pullRequestFileFilter = ""
+    var pullRequestSidebarWidth: CGFloat = 320
     var selectedPullRequestFile: String?
     var pullRequestDiff: ParsedDiff?
-    var pullRequestRows: [SideBySideRow] = []
+    var isPRSizeDoubled = false
+    var customPRSize: CGSize?
+    var displayedPRSize: CGSize = .zero
+    var pullRequestSelectionRevision: Int { pullRequestGeneration }
+    var requestedPRSize: CGSize {
+        customPRSize ?? (isPRSizeDoubled ? CGSize(width: 2160, height: 1300) : CGSize(width: 1080, height: 650))
+    }
+
+    func togglePRSize() {
+        customPRSize = nil
+        isPRSizeDoubled.toggle()
+        onPanelLayoutChange?()
+        AppDiagnostics.info(.appState, "PR view size doubled=\(isPRSizeDoubled)")
+    }
+
+    func resizePR(to size: CGSize) {
+        customPRSize = CGSize(width: max(860, size.width), height: max(360, size.height))
+        isPRSizeDoubled = false
+        onPanelLayoutChange?()
+    }
     var pullRequestError: String?
     var isLoadingPullRequest = false
     @ObservationIgnored private var pullRequestTask: Task<Void, Never>?
@@ -1053,12 +1074,16 @@ final class AppState {
             "actions run removed remote=\(remote.slug) runID=\(run.databaseId) excluded=true visible=false failedBranches=\(activities.filter { $0.state == .failed }.count) runningBranches=\(activities.filter { $0.state == .running }.count)")
     }
 
-    func openPullRequest(_ pr: BranchPullRequest) {
+    func openPullRequest(_ pr: BranchPullRequest, reload: Bool = false) {
         guard panelMode == .branches,
               let repo = actionsRepos.first(where: { repo in
                   guard let remote = repo.githubRemote else { return false }
                   return pr.url == "\(remote.webURL)/pull/\(pr.number)"
               }), let remote = repo.githubRemote else { return }
+        if !reload, selectedPullRequest?.url == pr.url, isExpanded {
+            clearActionSelection()
+            return
+        }
         clearActionSelection()
         selectedPullRequest = pr
         pullRequestRepoID = repo.id
@@ -1090,8 +1115,7 @@ final class AppState {
         selectedPullRequestFile = path
         let diff = DiffParser.parse(path: path, unifiedDiff: file.patch ?? "")
         pullRequestDiff = diff
-        pullRequestRows = DiffParser.sideBySideRows(from: diff)
-        AppDiagnostics.info(.appState, "PR diff file selected path=\(path) layout=\(diffViewMode.rawValue)")
+        AppDiagnostics.info(.appState, "PR diff file selected path=\(path) layout=inline wrap=true")
     }
 
     func clearPullRequest() {
@@ -1103,9 +1127,12 @@ final class AppState {
         pullRequestFiles = []
         collapsedPullRequestFolders = []
         pullRequestFileFilter = ""
+        pullRequestSidebarWidth = 320
         selectedPullRequestFile = nil
         pullRequestDiff = nil
-        pullRequestRows = []
+        customPRSize = nil
+        isPRSizeDoubled = false
+        displayedPRSize = .zero
         pullRequestError = nil
         isLoadingPullRequest = false
     }

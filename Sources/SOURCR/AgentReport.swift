@@ -37,6 +37,10 @@ struct AgentReport: Codable, Sendable {
         var files: [ReviewFile]
         var collapsedFolders: [String] = []
         var fileFilter: String = ""
+        var sizeDoubled: Bool = false
+        var panelWidth: Double = 0
+        var panelHeight: Double = 0
+        var sidebarWidth: Double = 320
     }
 
     struct ReviewFile: Codable, Sendable {
@@ -263,6 +267,7 @@ enum AgentReportRenderer {
                 line("- PR files: \(pr.files.count), loading \(pr.loading), selected \(pr.selectedFile ?? "none")")
                 if !pr.collapsedFolders.isEmpty { line("- Collapsed PR folders: \(pr.collapsedFolders.joined(separator: ", "))") }
                 if !pr.fileFilter.isEmpty { line("- PR file filter: \(pr.fileFilter)") }
+                line("- PR view: inline, wrapped; size \(Int(pr.panelWidth)) × \(Int(pr.panelHeight)), doubled \(pr.sizeDoubled), sidebar \(Int(pr.sidebarWidth))")
                 if let error = pr.error { line("- PR error: \(error)") }
                 if pr.fileLimitReached { line("- PR note: GitHub limits the list to 3,000 files") }
                 for file in pr.files {

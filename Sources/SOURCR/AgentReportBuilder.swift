@@ -139,8 +139,8 @@ final class AgentReportBuilder {
             detailPaneOpen: appState.isExpanded,
             selectedFile: appState.selectedFile?.path,
             selectedRunID: appState.selectedActionRun?.databaseId,
-            diffLayout: appState.diffViewMode.rawValue,
-            lineWrap: appState.wordWrap,
+            diffLayout: appState.selectedPullRequest == nil ? appState.diffViewMode.rawValue : "inline",
+            lineWrap: appState.selectedPullRequest == nil ? appState.wordWrap : true,
             statusMessage: appState.statusMessage,
             githubAccounts: appState.githubAccounts.logins,
             pullRequestReview: appState.selectedPullRequest.map {
@@ -150,7 +150,11 @@ final class AgentReportBuilder {
                       fileLimitReached: appState.pullRequestFiles.count >= 3000,
                       files: reviewFiles(options),
                       collapsedFolders: appState.collapsedPullRequestFolders.sorted(),
-                      fileFilter: appState.pullRequestFileFilter)
+                      fileFilter: appState.pullRequestFileFilter,
+                      sizeDoubled: appState.isPRSizeDoubled,
+                      panelWidth: appState.displayedPRSize.width,
+                      panelHeight: appState.displayedPRSize.height,
+                      sidebarWidth: appState.pullRequestSidebarWidth)
             }
         )
     }

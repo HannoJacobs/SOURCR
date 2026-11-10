@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.33
+
+- Simplified PR review to a headerless diff surface. The duplicate PR number/title strip, Draft PR subtitle, close button, refresh icon and browser shortcut are no longer part of the viewer; the selected branch and PR badge supply the identity while the selected-file header retains its full path and change counts.
+- PR changes now always render as wrapped inline diffs. The layout and wrapping controls are gone from PR review, while the separate local Diff mode keeps its own existing settings. Removed the unused PR side-by-side row payload and parsing work.
+- Increased the default file-tree width from 260 to 320 points so more folder names remain visible. Directory disclosure, compact folder chains, filename search, end ellipses and the draggable sidebar divider remain available.
+- Added a compact 2× button next to filename search. It requests twice the default panel width and height, expands toward the existing detail side and down from the same top edge, and caps both dimensions at the available screen edges. The 1× state returns to the default size.
+- Added a bottom outer-corner grip for manual resizing of the entire PR view. Dragging changes width and height together without detaching the panel or moving the branch list; double-clicking the grip also toggles the doubled size.
+- Clicking outside the PR detail area now collapses PR review. This includes clicks in another app and clicks elsewhere inside SOURCR; a deferred local mouse-up check lets the clicked control finish and guards the selection revision so opening another PR or workflow is not accidentally undone.
+- Pinning, detaching and menu-bar anchoring keep their existing behavior. Click-away collapses PR details even while the main panel stays pinned or detached, and a blue leading accent and tinted badge make the active PR visible in the branch list.
+- Agent reports reflect the forced inline/wrapped PR layout, requested doubled state, displayed width and height and sidebar width. Added sizing, click-boundary and window-mode preservation tests; updated README and advanced version/build to 1.33. SOURCR remains GET-only and read-only toward GitHub and git.
+
 ## 1.32
 
 - Replaced the PR viewer's flat, two-line path list with a GitHub-style file tree after inspecting a real Files changed page. The sidebar now conveys where changes happened through folders and indentation instead of repeating and truncating every full path.

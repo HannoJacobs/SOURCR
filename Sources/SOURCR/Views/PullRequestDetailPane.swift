@@ -3,8 +3,8 @@ import SwiftUI
 
 struct PullRequestDetailPane: View {
     @Environment(AppState.self) private var appState
-    @State private var sidebarWidth: CGFloat = 260
     @State private var sidebarDragStart: CGFloat?
+    var resizeActions = PanelDragActions()
     private var treeRows: [PullRequestFileTree.Row] {
         PullRequestFileTree.rows(paths: appState.pullRequestFiles.map(\.filename),
                                  collapsed: appState.collapsedPullRequestFolders,
@@ -17,25 +17,13 @@ struct PullRequestDetailPane: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            header
-            Divider()
-            HStack {
-                Text("Files changed · \(appState.pullRequestFiles.count)")
-                    .font(.system(size: 12, weight: .semibold))
-                Spacer(minLength: 4)
-                DiffModePicker()
-                WrapToggle()
-            }
-            .padding(8)
-            .fixedSize(horizontal: false, vertical: true)
-            Divider()
             if appState.isLoadingPullRequest {
                 message("Loading PR files from GitHub…")
             } else if let error = appState.pullRequestError {
                 VStack(spacing: 12) {
                     message(error)
                     Button("Retry") {
-                        if let pr = appState.selectedPullRequest { appState.openPullRequest(pr) }
+                        if let pr = appState.selectedPullRequest { appState.openPullRequest(pr, reload: true) }
                     }
                 }.padding()
             } else if appState.pullRequestFiles.isEmpty {
@@ -43,7 +31,7 @@ struct PullRequestDetailPane: View {
             } else {
                 GeometryReader { geometry in
                     HStack(spacing: 0) {
-                        fileList.frame(width: min(sidebarWidth, max(160, geometry.size.width - 280)))
+                        fileList.frame(width: min(appState.pullRequestSidebarWidth, max(160, geometry.size.width - 280)))
                         Rectangle()
                             .fill(Color.primary.opacity(0.12))
                             .frame(width: 1)
@@ -51,8 +39,8 @@ struct PullRequestDetailPane: View {
                             .contentShape(Rectangle())
                             .gesture(DragGesture(minimumDistance: 1)
                                 .onChanged { value in
-                                    if sidebarDragStart == nil { sidebarDragStart = sidebarWidth }
-                                    sidebarWidth = min(max(180, (sidebarDragStart ?? 260) + value.translation.width),
+                                    if sidebarDragStart == nil { sidebarDragStart = appState.pullRequestSidebarWidth }
+                                    appState.pullRequestSidebarWidth = min(max(180, (sidebarDragStart ?? 320) + value.translation.width),
                                                        min(440, max(180, geometry.size.width - 280)))
                                 }
                                 .onEnded { _ in sidebarDragStart = nil })
@@ -64,32 +52,18 @@ struct PullRequestDetailPane: View {
         }
         .background(SCMTheme.diffBackground)
         .onChange(of: appState.pullRequestFileFilter) { appState.collapsedPullRequestFolders = [] }
-        .onChange(of: appState.diffViewMode) {
-            AppDiagnostics.info(.appState, "PR diff layout=\(appState.diffViewMode.rawValue)")
+        .overlay(alignment: appState.detailPaneOnRight ? .bottomTrailing : .bottomLeading) {
+            PanelDragHandle(onBegan: resizeActions.began, onChanged: resizeActions.changed,
+                            onEnded: resizeActions.ended, onDoubleClick: { appState.togglePRSize() })
+                .overlay {
+                    Image(systemName: appState.detailPaneOnRight ? "arrow.up.left.and.arrow.down.right" : "arrow.up.right.and.arrow.down.left")
+                        .font(.system(size: 11)).foregroundStyle(.secondary).allowsHitTesting(false)
+                }
+                .frame(width: 26, height: 26)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 5))
+                .help("Drag to resize PR view · double-click for 2×")
+                .accessibilityLabel("Resize PR view")
         }
-    }
-
-    private var header: some View {
-        HStack(spacing: 8) {
-            if let pr = appState.selectedPullRequest {
-                Image(systemName: pr.state.symbolName).foregroundStyle(pr.state.tint)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("#\(pr.number) · \(pr.title)")
-                        .font(.system(size: 12, weight: .semibold)).lineLimit(2)
-                    Text(pr.state.label).font(.caption2).foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 0)
-                HeaderIconButton(systemName: "arrow.clockwise", help: "Refresh PR files", spinning: appState.isLoadingPullRequest) {
-                    appState.openPullRequest(pr)
-                }
-                HeaderIconButton(systemName: "safari", help: "Open on GitHub") {
-                    if let url = URL(string: pr.url + "/files") { NSWorkspace.shared.open(url) }
-                }
-            }
-            HeaderIconButton(systemName: "xmark", help: "Close PR files") { appState.clearActionSelection() }
-        }
-        .padding(10)
-        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     private var fileList: some View {
@@ -100,6 +74,11 @@ struct PullRequestDetailPane: View {
                 TextField("Filter changed files", text: $state.pullRequestFileFilter)
                     .textFieldStyle(.plain)
                     .accessibilityLabel("Filter PR files")
+                Button(appState.isPRSizeDoubled ? "1×" : "2×") { appState.togglePRSize() }
+                    .font(.system(size: 11, weight: .semibold))
+                    .buttonStyle(.borderless)
+                    .help(appState.isPRSizeDoubled ? "Restore default PR view size" : "Double PR view size, within the screen")
+                    .accessibilityLabel(appState.isPRSizeDoubled ? "Restore PR size" : "Double PR size")
             }
             .font(.system(size: 12))
             .padding(7)
@@ -185,10 +164,7 @@ struct PullRequestDetailPane: View {
                         .padding(8).frame(maxWidth: .infinity, alignment: .leading)
                 }
                 if let diff = appState.pullRequestDiff, !diff.isEmpty {
-                    switch appState.diffViewMode {
-                    case .inline: InlineDiffView(lines: diff.lines, wordWrap: appState.wordWrap)
-                    case .sideBySide: SideBySideDiffView(rows: appState.pullRequestRows, wordWrap: appState.wordWrap)
-                    }
+                    InlineDiffView(lines: diff.lines, wordWrap: true)
                 } else {
                     Spacer()
                 }
