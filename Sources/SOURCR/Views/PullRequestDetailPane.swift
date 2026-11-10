@@ -52,11 +52,11 @@ struct PullRequestDetailPane: View {
         }
         .background(SCMTheme.diffBackground)
         .onChange(of: appState.pullRequestFileFilter) { appState.collapsedPullRequestFolders = [] }
-        .overlay(alignment: appState.detailPaneOnRight ? .bottomTrailing : .bottomLeading) {
+        .overlay(alignment: appState.pullRequestOpensRight ? .bottomTrailing : .bottomLeading) {
             PanelDragHandle(onBegan: resizeActions.began, onChanged: resizeActions.changed,
                             onEnded: resizeActions.ended, onDoubleClick: { appState.togglePRSize() })
                 .overlay {
-                    Image(systemName: appState.detailPaneOnRight ? "arrow.up.left.and.arrow.down.right" : "arrow.up.right.and.arrow.down.left")
+                    Image(systemName: appState.pullRequestOpensRight ? "arrow.up.left.and.arrow.down.right" : "arrow.up.right.and.arrow.down.left")
                         .font(.system(size: 11)).foregroundStyle(.secondary).allowsHitTesting(false)
                 }
                 .frame(width: 26, height: 26)

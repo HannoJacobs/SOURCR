@@ -305,11 +305,6 @@ private struct WatchedBranchRow: View {
         .padding(.vertical, 5)
         .background(RoundedRectangle(cornerRadius: 5)
             .fill(hovered ? Color.primary.opacity(0.05) : Color.clear))
-        .overlay(alignment: .leading) {
-            if let pr = branch.pullRequest, appState.selectedPullRequest?.url == pr.url, appState.isExpanded {
-                RoundedRectangle(cornerRadius: 2).fill(Color.accentColor).frame(width: 3).padding(.vertical, 3).allowsHitTesting(false)
-            }
-        }
         .onHover { hovered = $0 }
         // The whole row opens its workflow list; the PR pill keeps its own click.
         .contentShape(Rectangle())

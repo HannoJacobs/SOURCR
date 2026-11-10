@@ -96,11 +96,12 @@ struct PullRequestPill: View {
     let pullRequest: BranchPullRequest
 
     @State private var isHovered = false
-    private var isSelected: Bool { appState.isExpanded && appState.selectedPullRequest?.url == pullRequest.url }
+    @State private var anchor = PRBadgeAnchor.Reference()
+    private var isSelected: Bool { appState.selectedPullRequest?.url == pullRequest.url }
 
     var body: some View {
         Button {
-            appState.openPullRequest(pullRequest)
+            appState.openPullRequest(pullRequest, anchorView: anchor.view)
         } label: {
             HStack(spacing: 2) {
                 Image(systemName: pullRequest.state.symbolName)
@@ -115,11 +116,11 @@ struct PullRequestPill: View {
             .padding(.vertical, 1)
             .background(
                 RoundedRectangle(cornerRadius: 4)
-                    .fill(isSelected ? Color.accentColor.opacity(0.22) : pullRequest.state.tint.opacity(isHovered ? 0.22 : 0.12))
+                    .fill(pullRequest.state.tint.opacity(isHovered ? 0.22 : 0.12))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 4)
-                    .strokeBorder(isSelected ? Color.accentColor : pullRequest.state.tint.opacity(isHovered ? 0.6 : 0.3), lineWidth: 1)
+                    .strokeBorder(pullRequest.state.tint.opacity(isHovered ? 0.6 : 0.3), lineWidth: 1)
             )
             .contentShape(Rectangle())
         }
@@ -132,6 +133,7 @@ struct PullRequestPill: View {
             Button("Hide until updated") { appState.hidePullRequest(pullRequest) }
                 .help("Hide this PR badge in SOURCR until the pull request changes")
         }
+        .background(PRBadgeAnchor(reference: anchor))
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .help("\(pullRequest.state.label) #\(pullRequest.number) — \(pullRequest.title)\nClick to review files in SOURCR")
     }

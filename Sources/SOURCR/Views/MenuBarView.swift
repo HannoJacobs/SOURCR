@@ -7,7 +7,6 @@ struct MenuBarView: View {
     var onClose: (() -> Void)?
     /// Supplied by StatusPanelController; moves the window and tears it off the menu bar.
     var dragActions = PanelDragActions()
-    var resizeActions = PanelDragActions()
 
     var body: some View {
         mainPanel
@@ -40,11 +39,7 @@ struct MenuBarView: View {
     private var detailPane: some View {
         switch appState.panelMode {
         case .branches:
-            if appState.selectedPullRequest != nil {
-                PullRequestDetailPane(resizeActions: resizeActions)
-            } else {
-                ActionsDetailPane()
-            }
+            ActionsDetailPane()
         case .diff:
             DiffPane()
         }

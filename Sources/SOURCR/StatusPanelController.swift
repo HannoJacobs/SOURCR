@@ -36,8 +36,7 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
     private var panel: NSPanel?
     private var hostingView: NSHostingView<AnyView>?
     private var globalClickMonitor: Any?
-    private var localClickMonitor: Any?
-    private var resizeStartSize: CGSize?
+    private lazy var prPopover = PRPopoverController(state: appState)
     private var pendingPanelResize: Task<Void, Never>?
     private var panelResizeGeneration = 0
 
@@ -158,6 +157,8 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
         pendingPanelResize = nil
         panelResizeGeneration += 1
         removeOutsideClickMonitor()
+        appState.clearPullRequest()
+        prPopover.close()
         panel?.orderOut(nil)
         // Detached position survives hide/show; the menu-bar anchor is re-read on open.
         clearAnchor()
@@ -193,6 +194,7 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
                 self.captureAnchorFromStatusItem()
             }
             self.applyFrame()
+            if let panel = self.panel { self.prPopover.sync(mainPanel: panel) }
         }
     }
 
@@ -335,7 +337,6 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
     private func applyFrame() {
         guard let panel else { return }
         var width = appState.isExpanded ? SOURCRLayout.expandedWidth : SOURCRLayout.scmWidth
-        if appState.selectedPullRequest != nil { width = appState.requestedPRSize.width }
         var height = appState.panelHeight
 
         var maxX: CGFloat
@@ -402,19 +403,6 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
         if appState.detailPaneOnRight != onRight {
             appState.detailPaneOnRight = onRight
         }
-        if appState.selectedPullRequest != nil, let visible {
-            let availableWidth = onRight
-                ? visible.maxX - 8 - (maxX - SOURCRLayout.scmWidth)
-                : maxX - (visible.minX + 8)
-            let fitted = PRPanelSizing.fit(requested: appState.requestedPRSize,
-                                          available: CGSize(width: availableWidth, height: topY - visible.minY - 8))
-            width = fitted.width
-            height = fitted.height
-        }
-        if appState.selectedPullRequest != nil {
-            appState.displayedPRSize = CGSize(width: width, height: height)
-        }
-
         var origin = NSPoint(x: originX(listColumnMaxX: maxX, width: width), y: topY - height)
 
         if let visible {
@@ -438,17 +426,6 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
         // contentView auto-fills the window. AppKit will redraw on its normal pass;
         // forcing display here would synchronously traverse the SwiftUI hierarchy.
         panel.setFrame(targetFrame, display: false)
-        if appState.selectedPullRequest != nil {
-            AppDiagnostics.info(.lifecycle, "PR view resized width=\(Int(width)) height=\(Int(height))")
-        }
-    }
-
-    private func beginPRResize() { resizeStartSize = panel?.frame.size }
-
-    private func updatePRResize(_ translation: CGSize) {
-        guard appState.selectedPullRequest != nil, let start = resizeStartSize else { return }
-        appState.resizePR(to: CGSize(width: start.width + (appState.detailPaneOnRight ? translation.width : -translation.width),
-                                    height: start.height - translation.height))
     }
 
     /// Right edge of the list column, which is the panel's fixed reference point.
@@ -469,11 +446,6 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
                 began: { [weak self] in self?.beginPanelDrag() },
                 changed: { [weak self] translation in self?.updatePanelDrag(translation: translation) },
                 ended: { [weak self] in self?.endPanelDrag() }
-            ),
-            resizeActions: PanelDragActions(
-                began: { [weak self] in self?.beginPRResize() },
-                changed: { [weak self] in self?.updatePRResize($0) },
-                ended: { [weak self] in self?.resizeStartSize = nil }
             )
         )
         .environment(appState)
@@ -515,30 +487,9 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
                 self?.dismissIfClickOutside()
             }
         }
-        // Let the clicked control finish its mouse-up before collapsing. Capture the
-        // selection revision so choosing another PR or workflow wins over dismissal.
-        localClickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseUp, .rightMouseUp]) { [weak self] event in
-            guard let self, self.appState.selectedPullRequest != nil, let panel = self.panel else { return event }
-            let insideDetail = event.window === panel && PRPanelSizing.containsDetail(
-                point: event.locationInWindow, panelSize: panel.frame.size, onRight: self.appState.detailPaneOnRight)
-            guard !insideDetail else { return event }
-            let revision = self.appState.pullRequestSelectionRevision
-            Task { @MainActor [weak self] in
-                await Task.yield()
-                guard let self, self.appState.selectedPullRequest != nil,
-                      self.appState.pullRequestSelectionRevision == revision else { return }
-                self.appState.clearActionSelection()
-                AppDiagnostics.info(.appState, "PR view collapsed after click outside detail")
-            }
-            return event
-        }
     }
 
     private func removeOutsideClickMonitor() {
-        if let localClickMonitor {
-            NSEvent.removeMonitor(localClickMonitor)
-            self.localClickMonitor = nil
-        }
         if let globalClickMonitor {
             NSEvent.removeMonitor(globalClickMonitor)
             self.globalClickMonitor = nil
@@ -566,10 +517,6 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
 
     private func dismissIfClickOutside() {
         guard isVisible, let panel else { return }
-        if appState.selectedPullRequest != nil, !panel.frame.contains(NSEvent.mouseLocation) {
-            appState.clearActionSelection()
-            AppDiagnostics.info(.appState, "PR view collapsed after click outside app")
-        }
         if appState.isPanelPinned || appState.isPanelDetached { return }
 
         let screenPoint = NSEvent.mouseLocation

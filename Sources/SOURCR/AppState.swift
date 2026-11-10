@@ -102,7 +102,6 @@ final class AppState {
 
     /// Window height for the anchored panel (content-fit, capped; taller when detail open).
     var panelHeight: CGFloat {
-        if selectedPullRequest != nil { return requestedPRSize.height }
         let body: CGFloat = scmBodyHeight > 1
             ? min(scmBodyHeight, SOURCRLayout.maxBodyHeight)
             : SOURCRLayout.emptyBodyHeight
@@ -199,6 +198,8 @@ final class AppState {
         }
     }
 
+    @ObservationIgnored weak var pullRequestAnchorView: NSView?
+    var pullRequestOpensRight = true
     var selectedPullRequest: BranchPullRequest?
     var pullRequestRepoID: UUID?
     var pullRequestFiles: [PullRequestFile] = []
@@ -210,7 +211,6 @@ final class AppState {
     var isPRSizeDoubled = false
     var customPRSize: CGSize?
     var displayedPRSize: CGSize = .zero
-    var pullRequestSelectionRevision: Int { pullRequestGeneration }
     var requestedPRSize: CGSize {
         customPRSize ?? (isPRSizeDoubled ? CGSize(width: 2160, height: 1300) : CGSize(width: 1080, height: 650))
     }
@@ -1074,21 +1074,24 @@ final class AppState {
             "actions run removed remote=\(remote.slug) runID=\(run.databaseId) excluded=true visible=false failedBranches=\(activities.filter { $0.state == .failed }.count) runningBranches=\(activities.filter { $0.state == .running }.count)")
     }
 
-    func openPullRequest(_ pr: BranchPullRequest, reload: Bool = false) {
+    func openPullRequest(_ pr: BranchPullRequest, reload: Bool = false, anchorView: NSView? = nil) {
         guard panelMode == .branches,
               let repo = actionsRepos.first(where: { repo in
                   guard let remote = repo.githubRemote else { return false }
                   return pr.url == "\(remote.webURL)/pull/\(pr.number)"
               }), let remote = repo.githubRemote else { return }
-        if !reload, selectedPullRequest?.url == pr.url, isExpanded {
+        if !reload, selectedPullRequest?.url == pr.url {
             clearActionSelection()
             return
         }
+        let source = anchorView ?? pullRequestAnchorView
         clearActionSelection()
+        pullRequestAnchorView = source
         selectedPullRequest = pr
         pullRequestRepoID = repo.id
         isLoadingPullRequest = true
-        isExpanded = true
+        isExpanded = false
+        onPanelLayoutChange?()
         let generation = pullRequestGeneration
         AppDiagnostics.info(.appState, "PR diff opened repo=\(remote.slug) number=\(pr.number)")
         pullRequestTask = Task { @MainActor in
@@ -1135,6 +1138,8 @@ final class AppState {
         displayedPRSize = .zero
         pullRequestError = nil
         isLoadingPullRequest = false
+        pullRequestAnchorView = nil
+        onPanelLayoutChange?()
     }
 
     func openBranchOnGitHub(_ branch: BranchInfo, in repoID: UUID) {

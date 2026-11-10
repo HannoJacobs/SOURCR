@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.34
+
+- PR review now opens in its own native macOS popover beside the SOURCR panel. It has a separate rounded surface, shadow and system pointer, so reviewing files no longer looks like one large window with a stretched branch column.
+- Opening a PR leaves the main panel at its normal 320-point width and content-fitted height. PR selection and the popover's requested size are independent of the main panel's expanded local-diff or workflow-detail layout.
+- The pointer is aligned with the clicked PR's row using the native view behind its badge. Its positioning rectangle spans the main panel at that row's height so the popover opens outside the branch list instead of covering it when space is on the left.
+- The popover chooses the side with more available room on the main panel's display. Requested width and height are capped to that space with room for the system arrow and margins; AppKit handles positioning within the visible display.
+- Native transient-popover behavior dismisses PR review when you interact elsewhere. The separate main panel continues to obey its existing menu-bar, pinned and detached-window rules, and closing the main panel also closes PR review.
+- Removed the active branch row's blue line and the PR badge's extra selection tint. The popover pointer now supplies the visual connection to its source, while the badge retains its ordinary open, draft, merged or closed color.
+- Kept wrapped inline diffs, filename search, collapsible folder navigation, the wider sidebar, the 2×/1× toggle and the bottom-corner resize grip inside the popover. Manual and doubled resizing now apply to that popover rather than the main SOURCR window.
+- Agent reports identify PR presentation as a popover, report its opening side and actual content size, and still include the loaded files and patches. Replaced obsolete attached-pane click-boundary logic and tests with coverage proving that PR opening and doubling leave the main panel's height unchanged; advanced version/build to 1.34.
+
 ## 1.33
 
 - Simplified PR review to a headerless diff surface. The duplicate PR number/title strip, Draft PR subtitle, close button, refresh icon and browser shortcut are no longer part of the viewer; the selected branch and PR badge supply the identity while the selected-file header retains its full path and change counts.

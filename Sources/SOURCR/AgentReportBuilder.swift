@@ -136,7 +136,7 @@ final class AgentReportBuilder {
             panelVisible: appState.isPanelVisible,
             pinned: appState.isPanelPinned,
             detached: appState.isPanelDetached,
-            detailPaneOpen: appState.isExpanded,
+            detailPaneOpen: appState.isExpanded || appState.selectedPullRequest != nil,
             selectedFile: appState.selectedFile?.path,
             selectedRunID: appState.selectedActionRun?.databaseId,
             diffLayout: appState.selectedPullRequest == nil ? appState.diffViewMode.rawValue : "inline",
@@ -154,7 +154,8 @@ final class AgentReportBuilder {
                       sizeDoubled: appState.isPRSizeDoubled,
                       panelWidth: appState.displayedPRSize.width,
                       panelHeight: appState.displayedPRSize.height,
-                      sidebarWidth: appState.pullRequestSidebarWidth)
+                      sidebarWidth: appState.pullRequestSidebarWidth,
+                      presentation: "popover", opensRight: appState.pullRequestOpensRight)
             }
         )
     }

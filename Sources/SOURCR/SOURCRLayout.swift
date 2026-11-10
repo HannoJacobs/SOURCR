@@ -77,11 +77,7 @@ enum PRPanelSizing {
                height: min(requested.height, max(1, available.height)))
     }
 
-    static func containsDetail(point: CGPoint, panelSize: CGSize, onRight: Bool) -> Bool {
-        let start: CGFloat = onRight ? SOURCRLayout.scmWidth : 0
-        let rect = CGRect(x: start, y: 0, width: max(0, panelSize.width - SOURCRLayout.scmWidth), height: panelSize.height)
-        return rect.contains(point)
-    }
+
 }
 
 /// Where a detached panel's fixed corner (right edge + top) may sit, given the
