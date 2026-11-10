@@ -20,8 +20,8 @@ struct PRPanelSizingTests {
     }
 
     @Test func doubledViewFitsBothScreenEdges() {
-        #expect(PRPanelSizing.fit(requested: CGSize(width: 2160, height: 1300), available: CGSize(width: 1400, height: 780)) == CGSize(width: 1400, height: 780))
-        #expect(PRPanelSizing.fit(requested: CGSize(width: 1080, height: 650), available: CGSize(width: 2200, height: 1400)) == CGSize(width: 1080, height: 650))
+        #expect(PRPanelSizing.fit(requested: CGSize(width: 2160, height: 1950), available: CGSize(width: 1400, height: 780)) == CGSize(width: 1400, height: 780))
+        #expect(PRPanelSizing.fit(requested: CGSize(width: 1080, height: 975), available: CGSize(width: 2200, height: 1400)) == CGSize(width: 1080, height: 975))
     }
 
     @Test @MainActor func resizingAndCollapsePreserveWindowMode() {
@@ -32,8 +32,9 @@ struct PRPanelSizingTests {
         state.selectedPullRequest = BranchPullRequest(number: 1, title: "PR", url: "https://github.com/example/repo/pull/1", state: .draft)
         state.isExpanded = true
         #expect(state.pullRequestSidebarWidth == 320)
+        #expect(state.requestedPRSize == CGSize(width: 1080, height: 975))
         state.togglePRSize()
-        #expect(state.requestedPRSize == CGSize(width: 2160, height: 1300))
+        #expect(state.requestedPRSize == CGSize(width: 2160, height: 1950))
         state.resizePR(to: CGSize(width: 1200, height: 720))
         #expect(!state.isPRSizeDoubled)
         #expect(state.requestedPRSize == CGSize(width: 1200, height: 720))

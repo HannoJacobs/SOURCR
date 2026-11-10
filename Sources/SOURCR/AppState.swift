@@ -207,12 +207,14 @@ final class AppState {
     var pullRequestFileFilter = ""
     var pullRequestSidebarWidth: CGFloat = 320
     var selectedPullRequestFile: String?
-    var pullRequestDiff: ParsedDiff?
+    var pullRequestDocument: [PRDiffDocumentRow] = []
+    var pullRequestScrollRequest = 0
+    var pullRequestScrollTarget: String?
     var isPRSizeDoubled = false
     var customPRSize: CGSize?
     var displayedPRSize: CGSize = .zero
     var requestedPRSize: CGSize {
-        customPRSize ?? (isPRSizeDoubled ? CGSize(width: 2160, height: 1300) : CGSize(width: 1080, height: 650))
+        customPRSize ?? (isPRSizeDoubled ? CGSize(width: 2160, height: 1950) : CGSize(width: 1080, height: 975))
     }
 
     func togglePRSize() {
@@ -1098,12 +1100,16 @@ final class AppState {
             do {
                 let credential = try await githubAccounts.credential(for: repo.githubAccount)
                 let files = try await PullRequestFilesService.load(remote: remote, number: pr.number, credential: credential)
+                let document = await Task.detached(priority: .userInitiated) {
+                    PRDiffDocumentRow.build(files: files)
+                }.value
                 try Task.checkCancellation()
                 guard generation == pullRequestGeneration else { return }
                 pullRequestFiles = files
+                pullRequestDocument = document
                 if let first = files.first { selectPullRequestFile(first.filename) }
                 isLoadingPullRequest = false
-                AppDiagnostics.info(.appState, "PR diff loaded repo=\(remote.slug) number=\(pr.number) files=\(files.count)")
+                AppDiagnostics.info(.appState, "PR diff loaded repo=\(remote.slug) number=\(pr.number) files=\(files.count) layout=continuous rows=\(document.count)")
             } catch {
                 guard generation == pullRequestGeneration, !Task.isCancelled else { return }
                 isLoadingPullRequest = false
@@ -1114,11 +1120,19 @@ final class AppState {
     }
 
     func selectPullRequestFile(_ path: String) {
-        guard let file = pullRequestFiles.first(where: { $0.filename == path }) else { return }
+        guard pullRequestFiles.contains(where: { $0.filename == path }) else { return }
         selectedPullRequestFile = path
-        let diff = DiffParser.parse(path: path, unifiedDiff: file.patch ?? "")
-        pullRequestDiff = diff
+        pullRequestScrollTarget = path
+        pullRequestScrollRequest += 1
         AppDiagnostics.info(.appState, "PR diff file selected path=\(path) layout=inline wrap=true")
+    }
+
+    func trackVisiblePullRequestFile(_ path: String) {
+        guard selectedPullRequestFile != path,
+              pullRequestFiles.contains(where: { $0.filename == path }) else { return }
+        selectedPullRequestFile = path
+        collapsedPullRequestFolders = collapsedPullRequestFolders.filter { !path.hasPrefix($0 + "/") }
+        AppDiagnostics.debug(.appState, "PR diff visible file=\(path)")
     }
 
     func clearPullRequest() {
@@ -1132,7 +1146,9 @@ final class AppState {
         pullRequestFileFilter = ""
         pullRequestSidebarWidth = 320
         selectedPullRequestFile = nil
-        pullRequestDiff = nil
+        pullRequestDocument = []
+        pullRequestScrollRequest = 0
+        pullRequestScrollTarget = nil
         customPRSize = nil
         isPRSizeDoubled = false
         displayedPRSize = .zero

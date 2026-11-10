@@ -104,7 +104,7 @@ struct InlineDiffView: View {
     }
 }
 
-private struct InlineDiffRow: View {
+struct InlineDiffRow: View {
     let line: DiffLine
     let wordWrap: Bool
     let containerWidth: CGFloat

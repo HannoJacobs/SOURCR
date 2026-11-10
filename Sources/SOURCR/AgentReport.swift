@@ -43,6 +43,7 @@ struct AgentReport: Codable, Sendable {
         var sidebarWidth: Double = 320
         var presentation: String = "popover"
         var opensRight: Bool = true
+        var reviewLayout: String = "continuous"
     }
 
     struct ReviewFile: Codable, Sendable {
@@ -270,7 +271,7 @@ enum AgentReportRenderer {
                 if !pr.collapsedFolders.isEmpty { line("- Collapsed PR folders: \(pr.collapsedFolders.joined(separator: ", "))") }
                 if !pr.fileFilter.isEmpty { line("- PR file filter: \(pr.fileFilter)") }
                 line("- PR view: inline, wrapped; size \(Int(pr.panelWidth)) × \(Int(pr.panelHeight)), doubled \(pr.sizeDoubled), sidebar \(Int(pr.sidebarWidth))")
-                line("- PR presentation: \(pr.presentation), opens \(pr.opensRight ? "right" : "left")")
+                line("- PR presentation: \(pr.presentation), opens \(pr.opensRight ? "right" : "left"), layout \(pr.reviewLayout)")
                 if let error = pr.error { line("- PR error: \(error)") }
                 if pr.fileLimitReached { line("- PR note: GitHub limits the list to 3,000 files") }
                 for file in pr.files {

@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.35
+
+- Raised the PR popover's default requested height from 650 to 975 points, making it up to 50 percent taller on displays with enough space. The existing screen cap still reserves margins for the native popover and keeps it inside the visible display.
+- Updated the 2× request to double the new default height to 1,950 points. Actual width and height remain bounded by the main panel's display, and the 1× control restores the taller new default rather than the previous size.
+- Replaced the single-selected-file diff area with one continuous vertical scroll through every loaded PR file. Scrolling down now reaches subsequent file diffs without requiring clicks in the file tree.
+- Each file starts with its own full-path header, addition and deletion counts and any previous name for a rename. File boundaries remain distinct as you scroll, and every diff retains its original line numbers, hunk markers and wrapped inline additions and deletions.
+- The left-hand tree now acts as navigation into that continuous document. Selecting a file scrolls its header to the top; selecting the same file again also jumps back to it after you have scrolled elsewhere. As the right side scrolls, the highlight follows the file at the top of the viewport, expands its parent folders and keeps its tree row in view.
+- Built one flat row stream across file headers, notes and diff lines, rendered by a single lazy scroll view. PR patches are parsed once off the main actor after loading rather than reparsed every time a different file is selected.
+- Files without text patches and partial patches retain their explanatory notes inside the stream. A binary or otherwise unavailable patch does not prevent scrolling on to the next file, and filename filtering and folder disclosure remain available in the sidebar.
+- Agent reports identify the review layout as continuous and continue to include every loaded patch and the popover's actual dimensions. Added coverage for cross-file ordering, unique anchors, independent line numbers, unavailable patches and repeat-click navigation; advanced version/build to 1.35.
+
 ## 1.34
 
 - PR review now opens in its own native macOS popover beside the SOURCR panel. It has a separate rounded surface, shadow and system pointer, so reviewing files no longer looks like one large window with a stretched branch column.

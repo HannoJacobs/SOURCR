@@ -34,7 +34,7 @@ struct PullRequestFilesTests {
         state.panelMode = .diff
         #expect(state.selectedPullRequest == nil)
         #expect(state.pullRequestFiles.isEmpty)
-        #expect(state.pullRequestDiff == nil)
+        #expect(state.pullRequestDocument.isEmpty)
         #expect(!state.isExpanded)
     }
 }

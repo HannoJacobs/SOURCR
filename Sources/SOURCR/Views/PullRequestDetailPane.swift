@@ -11,10 +11,6 @@ struct PullRequestDetailPane: View {
                                  filter: appState.pullRequestFileFilter)
     }
 
-    private var selectedFile: PullRequestFile? {
-        appState.pullRequestFiles.first { $0.filename == appState.selectedPullRequestFile }
-    }
-
     var body: some View {
         VStack(spacing: 0) {
             if appState.isLoadingPullRequest {
@@ -89,15 +85,20 @@ struct PullRequestDetailPane: View {
                 Text("GitHub limits this list to 3,000 files.")
                     .font(.caption2).foregroundStyle(.orange).padding(8)
             }
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(treeRows) { row in
-                        treeRow(row)
-                    }
-                    if treeRows.isEmpty {
-                        Text("No matching files").font(.caption).foregroundStyle(.secondary).padding(12)
-                    }
-                }.padding(.horizontal, 6).padding(.bottom, 8)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(treeRows) { row in
+                            treeRow(row)
+                        }
+                        if treeRows.isEmpty {
+                            Text("No matching files").font(.caption).foregroundStyle(.secondary).padding(12)
+                        }
+                    }.padding(.horizontal, 6).padding(.bottom, 8)
+                }
+                .onChange(of: appState.selectedPullRequestFile) {
+                    if let path = appState.selectedPullRequestFile { proxy.scrollTo(path, anchor: .center) }
+                }
             }
         }
         .background(SCMTheme.diffBackground)
@@ -144,33 +145,69 @@ struct PullRequestDetailPane: View {
         .accessibilityLabel(row.isDirectory ? "Folder \(row.name), \(row.isExpanded ? "expanded" : "collapsed")" : row.name)
     }
 
-    @ViewBuilder private var diffContent: some View {
-        if let file = selectedFile {
-            VStack(spacing: 0) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(file.filename).font(.system(size: 11, design: .monospaced)).textSelection(.enabled)
-                        if let old = file.previousFilename {
-                            Text("Renamed from \(old)").font(.caption2).foregroundStyle(.secondary)
+    private var diffContent: some View {
+        GeometryReader { geometry in
+            ScrollViewReader { proxy in
+                ScrollView(.vertical) {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(appState.pullRequestDocument) { row in
+                            Group {
+                            switch row {
+                            case .file(let file):
+                                fileHeader(file)
+                            case .note(_, let text):
+                                Text(text).font(.caption).foregroundStyle(.secondary)
+                                    .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                            case .line(_, let line):
+                                InlineDiffRow(line: line, wordWrap: true, containerWidth: geometry.size.width)
+                            }
+                            }
+                            .background(GeometryReader { position in
+                                let frame = position.frame(in: .named("pr-document"))
+                                Color.clear.preference(key: PRDiffVisibleRowsKey.self, value: [
+                                    PRDiffVisibility.Location(path: row.filePath, minY: frame.minY, maxY: frame.maxY)
+                                ])
+                            })
                         }
                     }
-                    Spacer(minLength: 0)
-                    Text("+\(file.additions)").foregroundStyle(.green)
-                    Text("−\(file.deletions)").foregroundStyle(.red)
-                }.font(.caption).padding(8)
-                Divider()
-                if let note = file.note {
-                    Text(note).font(.caption).foregroundStyle(.secondary)
-                        .padding(8).frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.bottom, 28)
                 }
-                if let diff = appState.pullRequestDiff, !diff.isEmpty {
-                    InlineDiffView(lines: diff.lines, wordWrap: true)
-                } else {
-                    Spacer()
+                .coordinateSpace(name: "pr-document")
+                .accessibilityLabel("All PR file diffs")
+                .onPreferenceChange(PRDiffVisibleRowsKey.self) { locations in
+                    if let path = PRDiffVisibility.fileAtTop(locations, viewportHeight: geometry.size.height) {
+                        appState.trackVisiblePullRequestFile(path)
+                    }
+                }
+                .onChange(of: appState.pullRequestScrollRequest) {
+                    if let path = appState.pullRequestScrollTarget {
+                        proxy.scrollTo(PRDiffDocumentRow.fileID(path), anchor: .top)
+                    }
                 }
             }
-        } else {
-            message("Select a file to review its changes.")
+        }
+    }
+
+    private func fileHeader(_ file: PullRequestFile) -> some View {
+        VStack(spacing: 0) {
+            Divider()
+            HStack(alignment: .top, spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(file.filename).font(.system(size: 11, design: .monospaced))
+                        .textSelection(.enabled)
+                    if let old = file.previousFilename {
+                        Text("Renamed from \(old)").font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+                Spacer(minLength: 0)
+                Text("+\(file.additions)").foregroundStyle(.green)
+                Text("−\(file.deletions)").foregroundStyle(.red)
+            }
+            .font(.caption).padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(nsColor: .windowBackgroundColor))
+            Divider()
         }
     }
 
@@ -178,5 +215,12 @@ struct PullRequestDetailPane: View {
         Text(text).font(.caption).foregroundStyle(.secondary)
             .multilineTextAlignment(.center).padding(20)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+private struct PRDiffVisibleRowsKey: PreferenceKey {
+    static let defaultValue: [PRDiffVisibility.Location] = []
+    static func reduce(value: inout [PRDiffVisibility.Location], nextValue: () -> [PRDiffVisibility.Location]) {
+        value.append(contentsOf: nextValue())
     }
 }
