@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.38
+
+- Added a compact summary bar across the top of the PR diff popover, keeping the overall size of the change visible while browsing the file directory or scrolling through the continuous document.
+- The bar shows how many files changed across the loaded PR, independently of the sidebar search or which folders are expanded. Filtering filenames no longer requires mentally reconstructing the overall scope.
+- Shows the total number of line changes as additions plus deletions, alongside separate green additions and red deletions. This describes changed lines rather than implying a count of individual editing operations.
+- Reads totals from GitHub's per-file change metadata, including files whose text patches are missing or truncated. The summary does not count only the lines currently rendered in the viewport.
+- Keeps the summary outside both scroll views, so it remains at the top while the file tree and diff document scroll independently. The permanent scrollbar gutters continue to reserve their own content space.
+- Withholds the numeric summary while a PR is loading or has failed, avoiding a temporary zero-change total. An empty successful PR can still show a zero-file summary above its existing empty-state message.
+- Uses compact typography, grouped numeric counts, monospaced digits and an accessibility description containing the file, total-line, addition and deletion counts. The existing 3,000-file limit remains visible and the summary tooltip qualifies those as loaded-file totals.
+- Exposes the same change summary in JSON and Markdown agent reports and logs the summary when it appears. Preserved inline wrapping, resize controls, pointer placement and click-away behavior; advanced version and build to 1.38.
+
 ## 1.37
 
 - Made both vertical scrollbars in PR review permanent: the changed-file directory and the continuous diff document each retain their own visible scrollbar, including while the mouse is elsewhere.

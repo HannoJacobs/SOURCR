@@ -155,7 +155,9 @@ final class AgentReportBuilder {
                       panelWidth: appState.displayedPRSize.width,
                       panelHeight: appState.displayedPRSize.height,
                       sidebarWidth: appState.pullRequestSidebarWidth,
-                      presentation: "popover", opensRight: appState.pullRequestOpensRight)
+                      presentation: "popover", opensRight: appState.pullRequestOpensRight,
+                      changeSummary: appState.isLoadingPullRequest || appState.pullRequestError != nil
+                        ? nil : appState.pullRequestChangeSummary)
             }
         )
     }

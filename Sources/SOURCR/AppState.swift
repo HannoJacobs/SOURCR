@@ -203,6 +203,7 @@ final class AppState {
     var selectedPullRequest: BranchPullRequest?
     var pullRequestRepoID: UUID?
     var pullRequestFiles: [PullRequestFile] = []
+    var pullRequestChangeSummary: PullRequestChangeSummary { .init(files: pullRequestFiles) }
     var collapsedPullRequestFolders: Set<String> = []
     var pullRequestFileFilter = ""
     static let defaultPRSidebarWidth: CGFloat = 320.0 * 2 / 3

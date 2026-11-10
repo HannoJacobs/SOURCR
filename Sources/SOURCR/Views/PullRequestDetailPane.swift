@@ -16,6 +16,10 @@ struct PullRequestDetailPane: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if !appState.isLoadingPullRequest, appState.pullRequestError == nil {
+                summaryBar
+                Divider()
+            }
             if appState.isLoadingPullRequest {
                 message("Loading PR files from GitHub…")
             } else if let error = appState.pullRequestError {
@@ -77,6 +81,33 @@ struct PullRequestDetailPane: View {
                 .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 5))
                 .help("Drag to resize PR view · double-click for 2×")
                 .accessibilityLabel("Resize PR view")
+        }
+    }
+
+    private var summaryBar: some View {
+        let summary = appState.pullRequestChangeSummary
+        return HStack(spacing: 12) {
+            Label("\(summary.fileCount.formatted()) \(summary.fileCount == 1 ? "file" : "files") changed", systemImage: "doc.on.doc")
+                .fontWeight(.medium)
+            Text("\(summary.lineChanges.formatted()) line changes")
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+            Text("+\(summary.additions.formatted())").foregroundStyle(.green)
+                .help("Lines added")
+            Text("−\(summary.deletions.formatted())").foregroundStyle(.red)
+                .help("Lines deleted")
+        }
+        .font(.system(size: 12))
+        .monospacedDigit()
+        .padding(.horizontal, 12).padding(.vertical, 10)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("PR summary: \(summary.fileCount) files changed, \(summary.lineChanges) line changes, \(summary.additions) additions, \(summary.deletions) deletions")
+        .help(appState.pullRequestFiles.count >= 3000
+              ? "Totals for the loaded files; GitHub limits the file list to 3,000."
+              : "Line changes are additions plus deletions across all files, including files without a text patch.")
+        .onAppear {
+            AppDiagnostics.info(.appState, "PR change summary files=\(summary.fileCount) additions=\(summary.additions) deletions=\(summary.deletions) lineChanges=\(summary.lineChanges)")
         }
     }
 

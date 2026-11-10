@@ -1,5 +1,19 @@
 import Foundation
 
+struct PullRequestChangeSummary: Codable, Sendable {
+    let fileCount: Int
+    let additions: Int
+    let deletions: Int
+    let lineChanges: Int
+
+    init(files: [PullRequestFile]) {
+        fileCount = files.count
+        additions = files.reduce(0) { $0 + $1.additions }
+        deletions = files.reduce(0) { $0 + $1.deletions }
+        lineChanges = additions + deletions
+    }
+}
+
 struct PullRequestFile: Codable, Identifiable, Sendable {
     var id: String { filename }
     let filename: String
