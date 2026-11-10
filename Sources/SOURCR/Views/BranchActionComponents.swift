@@ -90,7 +90,7 @@ struct RunningSpinner: View {
 }
 
 /// The branch's pull request, coloured by state the way GitHub does it:
-/// green open, grey draft, purple merged, red closed. Click opens it in the browser.
+/// green open, grey draft, purple merged, red closed. Click opens its files in SOURCR.
 struct PullRequestPill: View {
     @Environment(AppState.self) private var appState
     let pullRequest: BranchPullRequest
@@ -125,10 +125,13 @@ struct PullRequestPill: View {
         .buttonStyle(PressableButtonStyle())
         .onHover { isHovered = $0 }
         .contextMenu {
+            Button("Open on GitHub") {
+                if let url = URL(string: pullRequest.url) { NSWorkspace.shared.open(url) }
+            }
             Button("Hide until updated") { appState.hidePullRequest(pullRequest) }
                 .help("Hide this PR badge in SOURCR until the pull request changes")
         }
-        .help("\(pullRequest.state.label) #\(pullRequest.number) — \(pullRequest.title)\nClick to open on GitHub")
+        .help("\(pullRequest.state.label) #\(pullRequest.number) — \(pullRequest.title)\nClick to review files in SOURCR")
     }
 }
 

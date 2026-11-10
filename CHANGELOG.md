@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.31
+
+- Clicking a pull-request badge in Branches now opens its changed files inside SOURCR. Reviewing a PR no longer requires switching to the browser; the original GitHub page remains available from the Safari button and the badge context menu.
+- Added a changed-file sidebar with path filtering, file status, green addition counts and red deletion counts. Selecting a file shows its patch with the original and new line numbers and blue hunk headers, using the same rendering model as local diffs.
+- Added Inline and Side By Side controls directly above PR changes, together with the Wrap and No Wrap controls. Inline interleaves red removals and green additions; Side By Side pairs the old and new lines in equal columns.
+- PR details use the existing side-aware expansion: a list near the left edge opens its detail to the right, while a list near the right edge opens to the left. Detail width now adapts to the available space so opening it does not slide the clicked list across the screen.
+- PR file requests use the exact GitHub account configured for that repository, through the existing isolated credential environment. Requests are GET-only and paginated at 100 files per page, up to GitHub's documented limit of 3,000 files, which is labelled in the sidebar.
+- Binary and other files for which GitHub omits a text patch show an explicit explanation. Incomplete patches show a warning, renamed files retain their previous path, and failures expose a Retry action rather than leaving a permanent loading message.
+- Switching between a PR, a workflow or the Diff tab cancels the previous PR request and invalidates its generation, preventing a slow response from replacing the current selection. Refresh reloads the selected PR and Close restores the compact list.
+- Agent reports include the active PR review, selected file, load and error state, file list and patches, so the read-only loopback endpoint continues to match the native panel. Updated README and advanced version and build to 1.31; SOURCR still never mutates git or GitHub state.
+
 ## 1.30
 
 - Plain-text reports now mark source blocks with a random id chosen per report and stated at the top, as in [end diff a.txt id=1a2b3c4d]. A file containing a line that looks like the end of its own block can no longer pass the text after it off as report content.

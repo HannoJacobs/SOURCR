@@ -123,14 +123,14 @@ final class AgentReportBuilder {
                 pid: ProcessInfo.processInfo.processIdentifier,
                 logFile: AppDiagnostics.logFilePath
             ),
-            interface: interface(),
+            interface: interface(options),
             summary: Self.summary(diffRepos: diffRepos ?? [], githubRepos: githubRepos ?? []),
             diffRepos: diffRepos,
             githubRepos: githubRepos
         )
     }
 
-    private func interface() -> AgentReport.Interface {
+    private func interface(_ options: AgentReportOptions) -> AgentReport.Interface {
         AgentReport.Interface(
             mode: appState.panelMode.rawValue,
             panelVisible: appState.isPanelVisible,
@@ -142,8 +142,36 @@ final class AgentReportBuilder {
             diffLayout: appState.diffViewMode.rawValue,
             lineWrap: appState.wordWrap,
             statusMessage: appState.statusMessage,
-            githubAccounts: appState.githubAccounts.logins
+            githubAccounts: appState.githubAccounts.logins,
+            pullRequestReview: appState.selectedPullRequest.map {
+                .init(url: $0.url, number: $0.number, title: $0.title,
+                      loading: appState.isLoadingPullRequest, error: appState.pullRequestError,
+                      selectedFile: appState.selectedPullRequestFile,
+                      fileLimitReached: appState.pullRequestFiles.count >= 3000,
+                      files: reviewFiles(options))
+            }
         )
+    }
+
+    private func reviewFiles(_ options: AgentReportOptions) -> [AgentReport.ReviewFile] {
+        var budget = options.maxRepoBytes
+        return appState.pullRequestFiles.map { file in
+            var patch: String?
+            var note = file.note
+            if options.includeDiffs, let raw = file.patch {
+                let limit = min(options.maxFileBytes, budget)
+                let bytes = Data(raw.utf8)
+                let capped = bytes.count > limit ? Data(bytes.prefix(limit)).upToLastNewline : bytes
+                patch = String(decoding: capped, as: UTF8.self)
+                budget -= capped.count
+                if capped.count < bytes.count {
+                    note = [note, "Report patch truncated by size limit; use full=1."].compactMap { $0 }.joined(separator: " ")
+                }
+            }
+            return .init(filename: file.filename, previousFilename: file.previousFilename,
+                         status: file.status, additions: file.additions, deletions: file.deletions,
+                         patch: patch, note: note)
+        }
     }
 
     // MARK: - Diff

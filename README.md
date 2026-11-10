@@ -18,15 +18,16 @@ Menu bar icon
 - Watch local git repositories for **Diff** and GitHub repositories for **Branches**, including workflow activity (separate GitHub list from Diff)
 - **Branches mode:** Pins the default branch first, then shows remote branches newest-commit first, ten per repository; **Show more** adds ten. Each row shows the branch name (truncated at the end) with a workflow pill and PR badge in fixed columns, and a GitHub-style behind | ahead graph against the default branch beneath them. Rows are separated by dividers. The link icon at the right of each repository header opens its All branches page on GitHub. Right-click a branch to open it on GitHub or **Hide until updated** to hide that commit locally; a changed branch head brings it back, including after relaunch. Branches whose PR is merged (purple) are hidden automatically; pushing a new commit to one brings it back.
 - **Workflow pill:** once every workflow on a branch has finished, one pill shows a green tick or red cross with the number of completed workflows. While anything is running the pill is hidden; each running workflow shows its own orange spinner beneath the branch. Repository headers show orange running / red failed counts or a green tick.
+- **PR files:** Click a PR badge to review its changed files inside SOURCR. Filter by path and switch between Inline and Side By Side, with line wrapping, line numbers, red removals and green additions. The adjoining panel opens toward the side with more room and keeps the branch list anchored; it narrows when necessary. Refresh reloads the PR; the Safari button or badge context menu opens GitHub. Binary, unavailable and partial patches are labelled; GitHub limits the file list to 3,000 files.
 - Right-click a PR badge and choose **Hide until updated** to dismiss that observed PR revision locally. The badge returns when the PR changes; GitHub is never modified.
 - The mode selector uses icons in **Branches → Diff** order, with tooltips and accessible labels.
 - **Diff mode:** Shows combined staged + dirty changes and untracked files on the **current branch**
-- Click a file to open a diff to the left (Inline or Side By Side); click again to collapse
+- Click a file to open an adjoining diff (Inline or Side By Side); click again to collapse
 - **Workflow activity:** Running and failed workflows appear below their branch. Click anywhere on a branch row to show or hide its completed workflow results. Timers update live, and selecting a workflow opens its job and step detail.
 - Add a GitHub repository with its GitHub URL, SSH origin, or `owner/repo` in Branches Settings; the header’s Add button opens that form
 - Existing Actions folder watches convert to saved GitHub links once; if a folder was already removed, use its pencil button in Branches Settings to set the link
 - Click a workflow run to expand job/step detail beside the list; click again to collapse
-- The detail pane (Diff or workflow steps) opens towards whichever side of the display has more room, so the list you clicked stays in place
+- The detail pane (Diff, PR files or workflow steps) opens towards whichever side of the display has more room, so the list you clicked stays in place
 - Right-click any workflow run and choose **Remove** to permanently ignore that run in SOURCR. It disappears from the board and branch/repository health indicators, including after refresh or relaunch. GitHub history stays intact; new runs of that workflow still appear. Exclusions apply to the GitHub repository and run ID (including reruns of that ID), and survive removing and re-adding the repository. If every result is excluded, the branch is idle rather than reported as passing.
 - Repository headings use the GitHub repository name; right-click a heading to open GitHub’s **All branches** page or remove the watch
 - Settings manage local Diff repositories separately from the Branches GitHub list
@@ -53,7 +54,7 @@ curl -s http://127.0.0.1:47615/help                  # usage, for the agent itse
 ssh mac curl -s http://127.0.0.1:47615/state         # from devbox
 ```
 
-The report opens with a summary of what needs attention, then covers each watched Diff repository (branch, head, changed and untracked files, full diffs and untracked file contents), each watched GitHub repository (every branch with divergence, PR, check state and workflow runs, with jobs and steps for running and failed runs) and the panel's own state. Branches the panel hides stay listed, marked merged or hidden until updated. Unlike the panel, the report does not page branches ten at a time; like the panel, its runs come from each repository's newest 50.
+The report opens with a summary of what needs attention, then covers each watched Diff repository (branch, head, changed and untracked files, full diffs and untracked file contents), each watched GitHub repository (every branch with divergence, PR, check state and workflow runs, with jobs and steps for running and failed runs) and the panel's own state, including the selected PR review and its loaded file patches. Branches the panel hides stay listed, marked merged or hidden until updated. Unlike the panel, the report does not page branches ten at a time; like the panel, its runs come from each repository's newest 50.
 
 | Option | Effect |
 |---|---|
@@ -75,7 +76,7 @@ It is GET and HEAD only and cannot change anything. The port binds to loopback, 
 - No commit / push / pull
 - No rewrite of working tree state
 
-Read-only by design: `GitService` only allows `status`, `diff`, `show`, `rev-parse`, `ls-files`, and `remote get-url`. Workflow monitoring uses the `gh` CLI read-only (`run list` / `run view`). The agent endpoint serves GET and HEAD only.
+Read-only by design: `GitService` only allows `status`, `diff`, `show`, `rev-parse`, `ls-files`, and `remote get-url`. Workflow monitoring uses the `gh` CLI read-only (`run list` / `run view`); PR files use GET requests to GitHub’s files endpoint with the repository’s configured account. The agent endpoint serves GET and HEAD only.
 
 ## Requirements
 
@@ -133,7 +134,8 @@ Launch evidence is written to:
 | `DiffParser` | Unified + side-by-side rendering model |
 | `VSCodeSCMView` | Right-column multi-repo SCM + drag reorder |
 | `BranchesSCMView` | Remote branch overview with default-browser GitHub links |
-| `DiffPane` / `ActionsDetailPane` | Left-expand detail for file diffs or workflow steps |
+| `DiffPane` / `ActionsDetailPane` / `PullRequestDetailPane` | Side-aware detail for local diffs, workflow steps and PR files |
+| `PullRequestFilesService` | Paginated read-only PR patches from GitHub |
 | `SettingsPanel` | Viewer controls (right column overlay) |
 | `AgentEndpointServer` | Loopback HTTP server and request guards |
 | `AgentEndpoint` | Routes `/state`, `/health` and `/help` |

@@ -332,7 +332,7 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
 
     private func applyFrame() {
         guard let panel else { return }
-        let width = appState.isExpanded ? SOURCRLayout.expandedWidth : SOURCRLayout.scmWidth
+        var width = appState.isExpanded ? SOURCRLayout.expandedWidth : SOURCRLayout.scmWidth
         var height = appState.panelHeight
 
         var maxX: CGFloat
@@ -390,6 +390,12 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
             detailPaneSide = nil
         }
         let onRight = detailPaneSide == .right
+        if appState.isExpanded, let visible {
+            let available = onRight
+                ? visible.maxX - 8 - (maxX - SOURCRLayout.scmWidth)
+                : maxX - (visible.minX + 8)
+            width = min(width, max(SOURCRLayout.scmWidth, available))
+        }
         if appState.detailPaneOnRight != onRight {
             appState.detailPaneOnRight = onRight
         }

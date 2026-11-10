@@ -23,6 +23,28 @@ struct AgentReport: Codable, Sendable {
         var lineWrap: Bool
         var statusMessage: String?
         var githubAccounts: [String]
+        var pullRequestReview: PullRequestReview? = nil
+    }
+
+    struct PullRequestReview: Codable, Sendable {
+        var url: String
+        var number: Int
+        var title: String
+        var loading: Bool
+        var error: String?
+        var selectedFile: String?
+        var fileLimitReached: Bool
+        var files: [ReviewFile]
+    }
+
+    struct ReviewFile: Codable, Sendable {
+        var filename: String
+        var previousFilename: String?
+        var status: String
+        var additions: Int
+        var deletions: Int
+        var patch: String?
+        var note: String?
     }
 
     struct Summary: Codable, Sendable {
@@ -234,6 +256,18 @@ enum AgentReportRenderer {
             line("- Log: \(code(app.logFile))")
             line("- Panel: mode \(ui.mode), \(ui.panelVisible ? "visible" : "hidden"), pinned \(ui.pinned), detached \(ui.detached), detail pane \(ui.detailPaneOpen ? "open" : "closed")")
             line("- Diff layout: \(ui.diffLayout), line wrap \(ui.lineWrap)")
+            if let pr = ui.pullRequestReview {
+                line("- PR review: #\(pr.number) \(pr.title) — \(pr.url)")
+                line("- PR files: \(pr.files.count), loading \(pr.loading), selected \(pr.selectedFile ?? "none")")
+                if let error = pr.error { line("- PR error: \(error)") }
+                if pr.fileLimitReached { line("- PR note: GitHub limits the list to 3,000 files") }
+                for file in pr.files {
+                    line("- PR file: \(file.filename) (\(file.status), +\(file.additions) -\(file.deletions))")
+                    if let old = file.previousFilename { line("  Previous path: \(old)") }
+                    if let note = file.note { line("  Note: \(note)") }
+                    if let patch = file.patch { block(patch, language: "diff", label: "PR diff \(file.filename)") }
+                }
+            }
             if let file = ui.selectedFile { line("- Selected file: \(code(file))") }
             if let run = ui.selectedRunID { line("- Selected workflow run: \(run)") }
             if let message = ui.statusMessage { line("- Status message: \(message)") }

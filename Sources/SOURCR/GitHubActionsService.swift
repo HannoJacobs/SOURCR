@@ -411,7 +411,7 @@ enum GitHubActionsService {
     // MARK: - gh process
 
     /// Same temp-file + watchdog runner as git (`ExternalProcess`).
-    private static func runGH(_ arguments: [String], credential: GitHubCredential) async throws -> String {
+    static func runGH(_ arguments: [String], credential: GitHubCredential) async throws -> String {
         guard let executable = SOURCRGitHubEnvironment.executable else {
             throw GitHubActionsError.ghNotFound
         }

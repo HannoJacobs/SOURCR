@@ -108,7 +108,7 @@ final class AppState {
         let fitted = SOURCRLayout.chromeHeight + body
         let clamped = min(SOURCRLayout.maxPanelHeight, max(SOURCRLayout.minPanelHeight, fitted))
         if isExpanded {
-            return max(clamped, SOURCRLayout.minExpandedPanelHeight)
+            return max(clamped, selectedPullRequest == nil ? SOURCRLayout.minExpandedPanelHeight : 650)
         }
         return clamped
     }
@@ -191,12 +191,23 @@ final class AppState {
             collapseDetailIfNeeded()
             clearDiffPayload()
             clearActionPayload()
+            clearPullRequest()
             actionDetailTask?.cancel()
             actionDetailTask = nil
             actionDetailGeneration += 1
         }
     }
 
+    var selectedPullRequest: BranchPullRequest?
+    var pullRequestRepoID: UUID?
+    var pullRequestFiles: [PullRequestFile] = []
+    var selectedPullRequestFile: String?
+    var pullRequestDiff: ParsedDiff?
+    var pullRequestRows: [SideBySideRow] = []
+    var pullRequestError: String?
+    var isLoadingPullRequest = false
+    @ObservationIgnored private var pullRequestTask: Task<Void, Never>?
+    private var pullRequestGeneration = 0
     var actionsSnapshots: [UUID: RepoActionsSnapshot] = [:]
     var branchExclusions = BranchExclusions()
     var pullRequestExclusions = PullRequestExclusions()
@@ -461,6 +472,7 @@ final class AppState {
         if target != .diff, selectedActionRunID?.hasPrefix("\(repo.id.uuidString):") == true {
             clearActionSelection()
         }
+        if target != .diff, pullRequestRepoID == repo.id { clearActionSelection() }
         var list = repos(for: target)
         list.removeAll { $0.id == repo.id }
         setRepos(list, for: target)
@@ -535,6 +547,7 @@ final class AppState {
 
     func selectActionRun(_ run: ActionRun) {
         guard panelMode == .branches else { return }
+        clearPullRequest()
         selectedRepoID = run.repoID
 
         if selectedActionRunID == run.id && isExpanded {
@@ -565,6 +578,7 @@ final class AppState {
     }
 
     func clearActionSelection() {
+        clearPullRequest()
         actionDetailTask?.cancel()
         actionDetailTask = nil
         clearActionPayload()
@@ -1038,9 +1052,58 @@ final class AppState {
     }
 
     func openPullRequest(_ pr: BranchPullRequest) {
-        guard let url = URL(string: pr.url), !pr.url.isEmpty else { return }
-        NSWorkspace.shared.open(url)
-        AppDiagnostics.info(.appState, "default browser opened kind=pullRequest")
+        guard panelMode == .branches,
+              let repo = actionsRepos.first(where: { repo in
+                  guard let remote = repo.githubRemote else { return false }
+                  return pr.url == "\(remote.webURL)/pull/\(pr.number)"
+              }), let remote = repo.githubRemote else { return }
+        clearActionSelection()
+        selectedPullRequest = pr
+        pullRequestRepoID = repo.id
+        isLoadingPullRequest = true
+        isExpanded = true
+        let generation = pullRequestGeneration
+        AppDiagnostics.info(.appState, "PR diff opened repo=\(remote.slug) number=\(pr.number)")
+        pullRequestTask = Task { @MainActor in
+            do {
+                let credential = try await githubAccounts.credential(for: repo.githubAccount)
+                let files = try await PullRequestFilesService.load(remote: remote, number: pr.number, credential: credential)
+                try Task.checkCancellation()
+                guard generation == pullRequestGeneration else { return }
+                pullRequestFiles = files
+                if let first = files.first { selectPullRequestFile(first.filename) }
+                isLoadingPullRequest = false
+                AppDiagnostics.info(.appState, "PR diff loaded repo=\(remote.slug) number=\(pr.number) files=\(files.count)")
+            } catch {
+                guard generation == pullRequestGeneration, !Task.isCancelled else { return }
+                isLoadingPullRequest = false
+                pullRequestError = error.localizedDescription
+                AppDiagnostics.error(.appState, "PR diff failed number=\(pr.number) error=\(error.localizedDescription)")
+            }
+        }
+    }
+
+    func selectPullRequestFile(_ path: String) {
+        guard let file = pullRequestFiles.first(where: { $0.filename == path }) else { return }
+        selectedPullRequestFile = path
+        let diff = DiffParser.parse(path: path, unifiedDiff: file.patch ?? "")
+        pullRequestDiff = diff
+        pullRequestRows = DiffParser.sideBySideRows(from: diff)
+        AppDiagnostics.info(.appState, "PR diff file selected path=\(path) layout=\(diffViewMode.rawValue)")
+    }
+
+    func clearPullRequest() {
+        pullRequestTask?.cancel()
+        pullRequestTask = nil
+        pullRequestGeneration += 1
+        selectedPullRequest = nil
+        pullRequestRepoID = nil
+        pullRequestFiles = []
+        selectedPullRequestFile = nil
+        pullRequestDiff = nil
+        pullRequestRows = []
+        pullRequestError = nil
+        isLoadingPullRequest = false
     }
 
     func openBranchOnGitHub(_ branch: BranchInfo, in repoID: UUID) {

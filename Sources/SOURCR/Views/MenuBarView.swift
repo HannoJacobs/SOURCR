@@ -39,7 +39,11 @@ struct MenuBarView: View {
     private var detailPane: some View {
         switch appState.panelMode {
         case .branches:
-            ActionsDetailPane()
+            if appState.selectedPullRequest != nil {
+                PullRequestDetailPane()
+            } else {
+                ActionsDetailPane()
+            }
         case .diff:
             DiffPane()
         }

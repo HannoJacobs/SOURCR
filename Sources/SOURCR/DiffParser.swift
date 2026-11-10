@@ -22,15 +22,17 @@ enum DiffParser {
         var oldLine = 0
         var newLine = 0
         var id = 0
+        var inHunk = false
 
         for raw in unifiedDiff.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) {
-            if raw.hasPrefix("diff --git") || raw.hasPrefix("index ") || raw.hasPrefix("--- ") || raw.hasPrefix("+++ ") {
+            if !inHunk && (raw.hasPrefix("diff --git") || raw.hasPrefix("index ") || raw.hasPrefix("--- ") || raw.hasPrefix("+++ ")) {
                 lines.append(DiffLine(id: id, kind: .meta, text: raw, oldLineNumber: nil, newLineNumber: nil))
                 id += 1
                 continue
             }
 
             if raw.hasPrefix("@@") {
+                inHunk = true
                 if let (o, n) = parseHunkHeader(raw) {
                     oldLine = o
                     newLine = n
