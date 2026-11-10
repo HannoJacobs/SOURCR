@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.32
+
+- Replaced the PR viewer's flat, two-line path list with a GitHub-style file tree after inspecting a real Files changed page. The sidebar now conveys where changes happened through folders and indentation instead of repeating and truncating every full path.
+- Folder rows show blue folder icons and disclosure chevrons. Clicking a folder expands or collapses its descendants without changing the selected diff; nested folders keep their own collapse state as you explore the pull request.
+- Compact directory chains such as .agents/skills or src/vs share one row when there is no branching between them, matching GitHub's directory navigation and leaving more width for the meaningful part of the path.
+- File rows now show the filename by itself, on one line in the system font, with a document icon. Names use an ellipsis at the end when space runs out; middle truncation and the repeated status/addition/deletion line no longer obscure file identity.
+- Increased the file tree's initial width and added a draggable split divider between the tree and the diff. You can give long folder or file names more room while the surrounding branch list stays anchored in its existing position.
+- Filtering matches the full path and preserves the matching file's folder ancestry. Changing the filter expands the matching tree, empty results say No matching files, and disclosure controls remain usable while a filter is active.
+- File selection still uses full paths internally, so two files with the same basename in different directories open the correct patches. Full paths remain available on hover and in the diff header; additions, deletions and rename details stay with the selected file.
+- Agent reports now include the sidebar's filter and collapsed folder paths as well as the selected PR and file patches. Added tree tests for directory compression, nested indentation, identical basenames, selective collapse and filtering; advanced version and build to 1.32.
+
 ## 1.31
 
 - Clicking a pull-request badge in Branches now opens its changed files inside SOURCR. Reviewing a PR no longer requires switching to the browser; the original GitHub page remains available from the Safari button and the badge context menu.

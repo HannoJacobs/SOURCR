@@ -201,6 +201,8 @@ final class AppState {
     var selectedPullRequest: BranchPullRequest?
     var pullRequestRepoID: UUID?
     var pullRequestFiles: [PullRequestFile] = []
+    var collapsedPullRequestFolders: Set<String> = []
+    var pullRequestFileFilter = ""
     var selectedPullRequestFile: String?
     var pullRequestDiff: ParsedDiff?
     var pullRequestRows: [SideBySideRow] = []
@@ -1099,6 +1101,8 @@ final class AppState {
         selectedPullRequest = nil
         pullRequestRepoID = nil
         pullRequestFiles = []
+        collapsedPullRequestFolders = []
+        pullRequestFileFilter = ""
         selectedPullRequestFile = nil
         pullRequestDiff = nil
         pullRequestRows = []

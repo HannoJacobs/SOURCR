@@ -148,7 +148,9 @@ final class AgentReportBuilder {
                       loading: appState.isLoadingPullRequest, error: appState.pullRequestError,
                       selectedFile: appState.selectedPullRequestFile,
                       fileLimitReached: appState.pullRequestFiles.count >= 3000,
-                      files: reviewFiles(options))
+                      files: reviewFiles(options),
+                      collapsedFolders: appState.collapsedPullRequestFolders.sorted(),
+                      fileFilter: appState.pullRequestFileFilter)
             }
         )
     }

@@ -3,7 +3,13 @@ import SwiftUI
 
 struct PullRequestDetailPane: View {
     @Environment(AppState.self) private var appState
-    @State private var filter = ""
+    @State private var sidebarWidth: CGFloat = 260
+    @State private var sidebarDragStart: CGFloat?
+    private var treeRows: [PullRequestFileTree.Row] {
+        PullRequestFileTree.rows(paths: appState.pullRequestFiles.map(\.filename),
+                                 collapsed: appState.collapsedPullRequestFolders,
+                                 filter: appState.pullRequestFileFilter)
+    }
 
     private var selectedFile: PullRequestFile? {
         appState.pullRequestFiles.first { $0.filename == appState.selectedPullRequestFile }
@@ -35,15 +41,29 @@ struct PullRequestDetailPane: View {
             } else if appState.pullRequestFiles.isEmpty {
                 message("No changed files in this pull request.")
             } else {
-                HStack(spacing: 0) {
-                    fileList.frame(width: 190)
-                    Divider()
-                    diffContent.frame(maxWidth: .infinity, maxHeight: .infinity)
+                GeometryReader { geometry in
+                    HStack(spacing: 0) {
+                        fileList.frame(width: min(sidebarWidth, max(160, geometry.size.width - 280)))
+                        Rectangle()
+                            .fill(Color.primary.opacity(0.12))
+                            .frame(width: 1)
+                            .padding(.horizontal, 2)
+                            .contentShape(Rectangle())
+                            .gesture(DragGesture(minimumDistance: 1)
+                                .onChanged { value in
+                                    if sidebarDragStart == nil { sidebarDragStart = sidebarWidth }
+                                    sidebarWidth = min(max(180, (sidebarDragStart ?? 260) + value.translation.width),
+                                                       min(440, max(180, geometry.size.width - 280)))
+                                }
+                                .onEnded { _ in sidebarDragStart = nil })
+                            .accessibilityLabel("Resize file sidebar")
+                        diffContent.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
                 }
             }
         }
         .background(SCMTheme.diffBackground)
-        .onChange(of: appState.selectedPullRequest?.url) { filter = "" }
+        .onChange(of: appState.pullRequestFileFilter) { appState.collapsedPullRequestFolders = [] }
         .onChange(of: appState.diffViewMode) {
             AppDiagnostics.info(.appState, "PR diff layout=\(appState.diffViewMode.rawValue)")
         }
@@ -73,34 +93,76 @@ struct PullRequestDetailPane: View {
     }
 
     private var fileList: some View {
-        VStack(spacing: 0) {
-            TextField("Filter files…", text: $filter)
-                .textFieldStyle(.roundedBorder).padding(8)
-                .accessibilityLabel("Filter PR files")
+        @Bindable var state = appState
+        return VStack(spacing: 0) {
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField("Filter changed files", text: $state.pullRequestFileFilter)
+                    .textFieldStyle(.plain)
+                    .accessibilityLabel("Filter PR files")
+            }
+            .font(.system(size: 12))
+            .padding(7)
+            .background(SCMTheme.diffBackground, in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.primary.opacity(0.15)))
+            .padding(8)
             if appState.pullRequestFiles.count >= 3000 {
                 Text("GitHub limits this list to 3,000 files.")
                     .font(.caption2).foregroundStyle(.orange).padding(8)
             }
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 2) {
-                    ForEach(appState.pullRequestFiles.filter { filter.isEmpty || $0.filename.localizedCaseInsensitiveContains(filter) }) { file in
-                        PressableRow(action: { appState.selectPullRequestFile(file.filename) }, selected: file.filename == appState.selectedPullRequestFile) {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(file.filename).font(.system(size: 11, design: .monospaced))
-                                    .lineLimit(2).truncationMode(.middle)
-                                HStack(spacing: 5) {
-                                    Text(file.status).foregroundStyle(.secondary)
-                                    Text("+\(file.additions)").foregroundStyle(.green)
-                                    Text("−\(file.deletions)").foregroundStyle(.red)
-                                }.font(.system(size: 10))
-                            }
-                        }
-                        .help(file.filename)
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(treeRows) { row in
+                        treeRow(row)
                     }
-                }.padding(4)
+                    if treeRows.isEmpty {
+                        Text("No matching files").font(.caption).foregroundStyle(.secondary).padding(12)
+                    }
+                }.padding(.horizontal, 6).padding(.bottom, 8)
             }
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(SCMTheme.diffBackground)
+    }
+
+    private func treeRow(_ row: PullRequestFileTree.Row) -> some View {
+        Button {
+            if row.isDirectory {
+                if appState.collapsedPullRequestFolders.contains(row.id) {
+                    appState.collapsedPullRequestFolders.remove(row.id)
+                } else {
+                    appState.collapsedPullRequestFolders.insert(row.id)
+                }
+            } else {
+                appState.selectPullRequestFile(row.id)
+            }
+        } label: {
+            HStack(spacing: 6) {
+                if row.isDirectory {
+                    Image(systemName: row.isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(.secondary).frame(width: 12)
+                } else {
+                    Color.clear.frame(width: 12, height: 1)
+                }
+                Image(systemName: row.isDirectory ? "folder.fill" : "doc")
+                    .font(.system(size: 13))
+                    .foregroundStyle(row.isDirectory ? Color(red: 0.30, green: 0.65, blue: 1) : .secondary)
+                    .frame(width: 16)
+                Text(row.name)
+                    .font(.system(size: 12))
+                    .lineLimit(1).truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.leading, CGFloat(row.depth) * 14 + 6)
+            .padding(.trailing, 8)
+            .frame(height: 28)
+            .background(row.id == appState.selectedPullRequestFile ? Color.accentColor.opacity(0.12) : .clear,
+                        in: RoundedRectangle(cornerRadius: 5))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressableButtonStyle())
+        .help(row.id)
+        .accessibilityLabel(row.isDirectory ? "Folder \(row.name), \(row.isExpanded ? "expanded" : "collapsed")" : row.name)
     }
 
     @ViewBuilder private var diffContent: some View {
