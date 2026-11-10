@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.36
+
+- Fixed intermittent PR file-highlight drift by using the native scroll view position as the source of the top visible row.
+- Registered every diff header, note and line as a scroll target, preserving full file paths even when filenames or line numbers repeat.
+- File highlighting now follows native scroll updates instead of geometry preferences from lazily created rows.
+- File-tree navigation updates the same native position before jumping, keeping clicks and manual scrolling aligned. Repeated clicks still return to the file header.
+- The file tree uses native scroll positioning too, so revealing a highlighted file can wait for its newly expanded parent folders to lay out.
+- The native position retains the visible row when the PR pane or sidebar is resized, including the screen-bounded 2× toggle.
+- Kept the continuous wrapped inline document, collapsible folders, filename search, separate popover and click-away behavior. Agent reports retain the same selected-file source as the tree highlight, without issuing another document jump when that selection follows a manual scroll.
+- Added target-identity coverage across files with repeated basenames and line numbers; retained no-feedback and repeated-navigation coverage. Advanced version and build to 1.36.
+
 ## 1.35
 
 - Raised the PR popover's default requested height from 650 to 975 points, making it up to 50 percent taller on displays with enough space. The existing screen cap still reserves margins for the native popover and keeps it inside the visible display.

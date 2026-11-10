@@ -2,16 +2,19 @@ import Testing
 @testable import SOURCR
 
 struct PRDiffDocumentTests {
-    @Test func highlightFollowsTheTopVisibleRowAcrossFileBoundaries() {
-        let locations: [PRDiffVisibility.Location] = [
-            .init(path: "old.txt", minY: -30, maxY: -1),
-            .init(path: "current.txt", minY: -10, maxY: 4),
-            .init(path: "next.txt", minY: 4, maxY: 40),
-            .init(path: "below.txt", minY: 900, maxY: 930)
-        ]
-        #expect(PRDiffVisibility.fileAtTop(locations, viewportHeight: 800) == "current.txt")
-        #expect(PRDiffVisibility.fileAtTop(Array(locations.dropFirst(2)), viewportHeight: 800) == "next.txt")
-        #expect(PRDiffVisibility.fileAtTop([], viewportHeight: 800) == nil)
+    @Test func nativeScrollTargetsKeepExactPathsAcrossRepeatedLineNumbers() {
+        let files = ["a/same.txt", "b/same.txt"].map {
+            PullRequestFile(filename: $0, previousFilename: nil, status: "modified", additions: 1, deletions: 1,
+                            patch: "@@ -1 +1 @@\n-old\n+new")
+        }
+        let rows = PRDiffDocumentRow.build(files: files)
+        #expect(Set(rows.map(\.scrollTarget)).count == rows.count)
+        for row in rows {
+            #expect(row.scrollTarget.path == row.filePath)
+            if case .file(let file) = row {
+                #expect(row.scrollTarget == .file(file.filename))
+            }
+        }
     }
 
     @Test @MainActor func viewportTrackingDoesNotCreateOrRetargetScrollCommands() {

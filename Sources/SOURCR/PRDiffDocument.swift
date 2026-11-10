@@ -2,6 +2,15 @@ import Foundation
 
 /// One ordered stream lets a single lazy scroll view cross file boundaries.
 enum PRDiffDocumentRow: Identifiable {
+    struct ScrollTarget: Hashable {
+        let rowID: String
+        let path: String
+
+        static func file(_ path: String) -> Self {
+            Self(rowID: PRDiffDocumentRow.fileID(path), path: path)
+        }
+    }
+
     case file(PullRequestFile)
     case note(path: String, text: String)
     case line(path: String, value: DiffLine)
@@ -23,6 +32,8 @@ enum PRDiffDocumentRow: Identifiable {
         }
     }
 
+    var scrollTarget: ScrollTarget { .init(rowID: id, path: filePath) }
+
     static func build(files: [PullRequestFile]) -> [Self] {
         var rows: [Self] = []
         for file in files {
@@ -34,18 +45,5 @@ enum PRDiffDocumentRow: Identifiable {
             }
         }
         return rows
-    }
-}
-
-enum PRDiffVisibility {
-    struct Location: Equatable {
-        let path: String
-        let minY: CGFloat
-        let maxY: CGFloat
-    }
-
-    static func fileAtTop(_ locations: [Location], viewportHeight: CGFloat) -> String? {
-        locations.filter { $0.maxY > 0 && $0.minY < viewportHeight }
-            .min { $0.minY < $1.minY }?.path
     }
 }

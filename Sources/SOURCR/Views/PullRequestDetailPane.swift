@@ -4,6 +4,8 @@ import SwiftUI
 struct PullRequestDetailPane: View {
     @Environment(AppState.self) private var appState
     @State private var sidebarDragStart: CGFloat?
+    @State private var visibleDiffRow: PRDiffDocumentRow.ScrollTarget?
+    @State private var sidebarPosition: String?
     var resizeActions = PanelDragActions()
     private var treeRows: [PullRequestFileTree.Row] {
         PullRequestFileTree.rows(paths: appState.pullRequestFiles.map(\.filename),
@@ -85,20 +87,22 @@ struct PullRequestDetailPane: View {
                 Text("GitHub limits this list to 3,000 files.")
                     .font(.caption2).foregroundStyle(.orange).padding(8)
             }
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(treeRows) { row in
-                            treeRow(row)
-                        }
-                        if treeRows.isEmpty {
-                            Text("No matching files").font(.caption).foregroundStyle(.secondary).padding(12)
-                        }
-                    }.padding(.horizontal, 6).padding(.bottom, 8)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(treeRows) { row in
+                        treeRow(row)
+                    }
+                    if treeRows.isEmpty {
+                        Text("No matching files").font(.caption).foregroundStyle(.secondary).padding(12)
+                    }
                 }
-                .onChange(of: appState.selectedPullRequestFile) {
-                    if let path = appState.selectedPullRequestFile { proxy.scrollTo(path, anchor: .center) }
-                }
+                .scrollTargetLayout()
+                .padding(.horizontal, 6).padding(.bottom, 8)
+            }
+            .scrollPosition(id: $sidebarPosition, anchor: .center)
+            .onAppear { sidebarPosition = appState.selectedPullRequestFile }
+            .onChange(of: appState.selectedPullRequestFile) {
+                sidebarPosition = appState.selectedPullRequestFile
             }
         }
         .background(SCMTheme.diffBackground)
@@ -162,27 +166,25 @@ struct PullRequestDetailPane: View {
                                 InlineDiffRow(line: line, wordWrap: true, containerWidth: geometry.size.width)
                             }
                             }
-                            .background(GeometryReader { position in
-                                let frame = position.frame(in: .named("pr-document"))
-                                Color.clear.preference(key: PRDiffVisibleRowsKey.self, value: [
-                                    PRDiffVisibility.Location(path: row.filePath, minY: frame.minY, maxY: frame.maxY)
-                                ])
-                            })
+                            .id(row.scrollTarget)
                         }
                     }
+                    .scrollTargetLayout()
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.bottom, 28)
                 }
-                .coordinateSpace(name: "pr-document")
+                .scrollPosition(id: $visibleDiffRow, anchor: .top)
                 .accessibilityLabel("All PR file diffs")
-                .onPreferenceChange(PRDiffVisibleRowsKey.self) { locations in
-                    if let path = PRDiffVisibility.fileAtTop(locations, viewportHeight: geometry.size.height) {
-                        appState.trackVisiblePullRequestFile(path)
+                .onChange(of: visibleDiffRow) {
+                    if let target = visibleDiffRow {
+                        appState.trackVisiblePullRequestFile(target.path)
                     }
                 }
                 .onChange(of: appState.pullRequestScrollRequest) {
                     if let path = appState.pullRequestScrollTarget {
-                        proxy.scrollTo(PRDiffDocumentRow.fileID(path), anchor: .top)
+                        let target = PRDiffDocumentRow.ScrollTarget.file(path)
+                        visibleDiffRow = target
+                        proxy.scrollTo(target, anchor: .top)
                     }
                 }
             }
@@ -215,12 +217,5 @@ struct PullRequestDetailPane: View {
         Text(text).font(.caption).foregroundStyle(.secondary)
             .multilineTextAlignment(.center).padding(20)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-}
-
-private struct PRDiffVisibleRowsKey: PreferenceKey {
-    static let defaultValue: [PRDiffVisibility.Location] = []
-    static func reduce(value: inout [PRDiffVisibility.Location], nextValue: () -> [PRDiffVisibility.Location]) {
-        value.append(contentsOf: nextValue())
     }
 }
