@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.39
+
+- Cache each PR's changed-file metadata, patches and parsed continuous diff document for the running app session. Reopening the same comparison immediately restores that data without another file download or parse.
+- Separate the lifetime of the open popover from the lifetime of its request. Clicking away clears the visible review but leaves an in-flight load running, so its result is cached even if the popover was only open briefly.
+- Reopening while the same PR is still loading joins the existing request. Multiple opens share one load rather than starting duplicate GitHub requests for the same comparison.
+- Identify comparisons by the PR head commit, base commit and base branch name. Extend the existing branch metadata query with base identity; comments, titles, review activity and check-state updates do not invalidate a diff.
+- When ordinary branch refresh discovers a changed comparison for the open PR, update its files through the same cache. A later visit to a closed PR uses its newly observed comparison identity to decide whether a reload is needed.
+- Validate commit identities after downloading the file pages before caching the result. If commits changed during the download, retry against the new identity with a bounded retry count rather than caching pages across different comparisons.
+- Scope cache entries to the repository, PR number and selected GitHub account. Protect cache replacement from an older load finishing after a newer revision, and retain the view's generation guards against stale visible results.
+- Expose cache status and cached head/base identity in JSON and Markdown reports, with runtime cache-hit and completion diagnostics. Failed loads can be retried and do not become successful cache entries; advanced version and build to 1.39.
+
 ## 1.38
 
 - Added a compact summary bar across the top of the PR diff popover, keeping the overall size of the change visible while browsing the file directory or scrolling through the continuous document.

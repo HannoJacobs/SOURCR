@@ -46,6 +46,8 @@ struct AgentReport: Codable, Sendable {
         var reviewLayout: String = "continuous"
         var scrollbarPolicy: String = "permanent-gutters"
         var changeSummary: PullRequestChangeSummary? = nil
+        var cacheStatus: String = "empty"
+        var cachedRevision: PullRequestDiffRevision? = nil
     }
 
     struct ReviewFile: Codable, Sendable {
@@ -276,6 +278,10 @@ enum AgentReportRenderer {
                 line("- PR presentation: \(pr.presentation), opens \(pr.opensRight ? "right" : "left"), layout \(pr.reviewLayout), scrollbars \(pr.scrollbarPolicy)")
                 if let summary = pr.changeSummary {
                     line("- PR totals: \(summary.fileCount) files, \(summary.lineChanges) line changes (+\(summary.additions) −\(summary.deletions))")
+                }
+                line("- PR cache: \(pr.cacheStatus)")
+                if let revision = pr.cachedRevision {
+                    line("- Cached comparison: \(revision.baseName) \(revision.base) → \(revision.head)")
                 }
                 if let error = pr.error { line("- PR error: \(error)") }
                 if pr.fileLimitReached { line("- PR note: GitHub limits the list to 3,000 files") }

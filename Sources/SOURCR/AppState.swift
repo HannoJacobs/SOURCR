@@ -233,6 +233,9 @@ final class AppState {
     }
     var pullRequestError: String?
     var isLoadingPullRequest = false
+    var pullRequestCacheStatus = "empty"
+    var pullRequestCacheRevision: PullRequestDiffRevision?
+    @ObservationIgnored private let pullRequestDiffCache = PullRequestDiffCache()
     @ObservationIgnored private var pullRequestTask: Task<Void, Never>?
     private var pullRequestGeneration = 0
     var actionsSnapshots: [UUID: RepoActionsSnapshot] = [:]
@@ -998,6 +1001,7 @@ final class AppState {
                 fetchedAt: Date(),
                 branchesFetchedAt: branchesFetchedAt
             )
+            refreshOpenPullRequest(in: repo, branches: branches)
             AppDiagnostics.debug(
                 .appState,
                 "actions account=\(repo.githubAccount ?? "unassigned") repo=\(repo.actionsTitle) remote=\(remote.slug) branchesURL=\(remote.branchesURL) source=github localCheckoutRequired=false runs=\(runs.count) running=\(runs.filter(\.isRunning).count) branches=\(branches.count)"
@@ -1096,29 +1100,71 @@ final class AppState {
         isLoadingPullRequest = true
         isExpanded = false
         onPanelLayoutChange?()
-        let generation = pullRequestGeneration
         AppDiagnostics.info(.appState, "PR diff opened repo=\(remote.slug) number=\(pr.number)")
+        loadPullRequest(pr, repo: repo, remote: remote, force: reload)
+    }
+
+    private func loadPullRequest(_ pr: BranchPullRequest, repo: WatchedRepo, remote: GitHubRemote, force: Bool = false) {
+        let key = PullRequestDiffCache.Key(account: (repo.githubAccount ?? "").lowercased(),
+                                           repository: remote.slug.lowercased(), number: pr.number)
+        if !force, let snapshot = pullRequestDiffCache.cached(key: key, hint: pr.diffRevision) {
+            applyPullRequestSnapshot(snapshot)
+            pullRequestCacheStatus = "hit"
+            AppDiagnostics.info(.appState, "PR diff cache hit repo=\(remote.slug) number=\(pr.number) files=\(snapshot.files.count)")
+            return
+        }
+        isLoadingPullRequest = true
+        pullRequestError = nil
+        pullRequestCacheStatus = "loading"
+        let generation = pullRequestGeneration
+        let accounts = githubAccounts
+        let cache = pullRequestDiffCache
         pullRequestTask = Task { @MainActor in
             do {
-                let credential = try await githubAccounts.credential(for: repo.githubAccount)
-                let files = try await PullRequestFilesService.load(remote: remote, number: pr.number, credential: credential)
-                let document = await Task.detached(priority: .userInitiated) {
-                    PRDiffDocumentRow.build(files: files)
-                }.value
+                let snapshot = try await cache.load(key: key, hint: pr.diffRevision, force: force) {
+                    let credential = try await accounts.credential(for: repo.githubAccount)
+                    return try await PullRequestFilesService.loadSnapshot(remote: remote, number: pr.number,
+                                                                         hint: pr.diffRevision, credential: credential)
+                }
                 try Task.checkCancellation()
-                guard generation == pullRequestGeneration else { return }
-                pullRequestFiles = files
-                pullRequestDocument = document
-                if let first = files.first { selectPullRequestFile(first.filename) }
-                isLoadingPullRequest = false
-                AppDiagnostics.info(.appState, "PR diff loaded repo=\(remote.slug) number=\(pr.number) files=\(files.count) layout=continuous rows=\(document.count)")
+                guard generation == pullRequestGeneration,
+                      actionsRepos.first(where: { $0.id == repo.id })?.githubAccount?.lowercased() == key.account else { return }
+                applyPullRequestSnapshot(snapshot)
+                pullRequestCacheStatus = "loaded"
+                AppDiagnostics.info(.appState, "PR diff loaded repo=\(remote.slug) number=\(pr.number) files=\(snapshot.files.count) layout=continuous rows=\(snapshot.document.count)")
             } catch {
                 guard generation == pullRequestGeneration, !Task.isCancelled else { return }
                 isLoadingPullRequest = false
                 pullRequestError = error.localizedDescription
+                pullRequestCacheStatus = "error"
                 AppDiagnostics.error(.appState, "PR diff failed number=\(pr.number) error=\(error.localizedDescription)")
             }
         }
+    }
+
+    private func applyPullRequestSnapshot(_ snapshot: PullRequestDiffSnapshot) {
+        pullRequestFiles = snapshot.files
+        pullRequestDocument = snapshot.document
+        pullRequestCacheRevision = snapshot.revision
+        pullRequestError = nil
+        isLoadingPullRequest = false
+        if let path = selectedPullRequestFile, snapshot.files.contains(where: { $0.filename == path }) {
+            selectPullRequestFile(path)
+        } else if let first = snapshot.files.first {
+            selectPullRequestFile(first.filename)
+        }
+    }
+
+    private func refreshOpenPullRequest(in repo: WatchedRepo, branches: [BranchInfo]) {
+        guard pullRequestRepoID == repo.id, let selected = selectedPullRequest,
+              let latest = branches.compactMap(\.pullRequest).first(where: { $0.url == selected.url }),
+              let remote = repo.githubRemote else { return }
+        selectedPullRequest = latest
+        guard latest.diffRevision != selected.diffRevision else { return }
+        pullRequestTask?.cancel()
+        pullRequestGeneration += 1
+        AppDiagnostics.info(.appState, "PR diff comparison changed number=\(latest.number)")
+        loadPullRequest(latest, repo: repo, remote: remote)
     }
 
     func selectPullRequestFile(_ path: String) {
@@ -1156,6 +1202,8 @@ final class AppState {
         displayedPRSize = .zero
         pullRequestError = nil
         isLoadingPullRequest = false
+        pullRequestCacheStatus = "empty"
+        pullRequestCacheRevision = nil
         pullRequestAnchorView = nil
         onPanelLayoutChange?()
     }

@@ -157,7 +157,9 @@ final class AgentReportBuilder {
                       sidebarWidth: appState.pullRequestSidebarWidth,
                       presentation: "popover", opensRight: appState.pullRequestOpensRight,
                       changeSummary: appState.isLoadingPullRequest || appState.pullRequestError != nil
-                        ? nil : appState.pullRequestChangeSummary)
+                        ? nil : appState.pullRequestChangeSummary,
+                      cacheStatus: appState.pullRequestCacheStatus,
+                      cachedRevision: appState.pullRequestCacheRevision)
             }
         )
     }

@@ -283,7 +283,7 @@ enum GitHubActionsService {
             try Task.checkCancellation()
             let batch = Array(branches[start..<min(start + divergenceBatchSize, branches.count)])
             let fields = batch.enumerated().map { index, name in
-                "b\(index): pullRequests(headRefName:\"\(escapeGraphQLString(name))\",states:[OPEN,CLOSED,MERGED],first:1,orderBy:{field:UPDATED_AT,direction:DESC}){ nodes{ number title url isDraft state headRefName updatedAt headRefOid } }"
+                "b\(index): pullRequests(headRefName:\"\(escapeGraphQLString(name))\",states:[OPEN,CLOSED,MERGED],first:1,orderBy:{field:UPDATED_AT,direction:DESC}){ nodes{ number title url isDraft state headRefName updatedAt headRefOid baseRefOid baseRefName } }"
             }.joined(separator: "\n")
             let query = """
             query($owner:String!,$name:String!){
@@ -309,7 +309,8 @@ enum GitHubActionsService {
                 result[name] = BranchPullRequest(
                     number: node.number, title: node.title ?? "", url: node.url ?? "",
                     state: PullRequestState.from(rawState: node.state ?? "OPEN", isDraft: node.isDraft ?? false),
-                    updatedAt: node.updatedAt, headOID: node.headRefOid
+                    updatedAt: node.updatedAt, headOID: node.headRefOid,
+                    baseOID: node.baseRefOid, baseRefName: node.baseRefName
                 )
             }
         }
@@ -651,6 +652,8 @@ private struct GHPullRequestsResponse: Decodable {
         let headRefName: String?
         let updatedAt: String?
         let headRefOid: String?
+        let baseRefOid: String?
+        let baseRefName: String?
     }
 }
 

@@ -445,15 +445,23 @@ struct BranchPullRequest: Hashable {
     let state: PullRequestState
     let updatedAt: String?
     let headOID: String?
+    let baseOID: String?
+    let baseRefName: String?
 
     init(number: Int, title: String, url: String, state: PullRequestState,
-         updatedAt: String? = nil, headOID: String? = nil) {
+         updatedAt: String? = nil, headOID: String? = nil, baseOID: String? = nil, baseRefName: String? = nil) {
         self.number = number
         self.title = title
         self.url = url
         self.state = state
         self.updatedAt = updatedAt
         self.headOID = headOID
+        self.baseOID = baseOID
+        self.baseRefName = baseRefName
+    }
+
+    var diffRevision: PullRequestDiffRevision {
+        .init(head: headOID ?? "", base: baseOID ?? "", baseName: baseRefName ?? "")
     }
 
     var exclusionRevision: String {
