@@ -19,6 +19,7 @@ struct ActionsDetailPane: View {
             HStack(spacing: 8) {
                 if let run = appState.selectedActionDetail?.run ?? appState.selectedActionRun {
                     ActionStatusIcon(run: run)
+                    RunPullRequestLabel(run: run)
                     WorkflowBadge(kind: run.workflowKind)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(run.workflowName)

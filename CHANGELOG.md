@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.40
+
+- Show a small light-grey PR reference such as `(#123)` immediately before each workflow's CI, CD or other kind badge. Keep the workflow name, elapsed time and status icon in their existing row, with the new reference sized to fit beside the badge.
+- Read explicit pull request associations from GitHub's workflow-run API instead of inferring a PR from the branch's newest badge or parsing the workflow title. Runs with multiple explicit associations show their distinct PR numbers together in ascending order.
+- Resolve missing associations with one batched commit query per repository. A merged PR must have the exact merge commit used by the run; feature-head matches require both the exact head commit and matching branch name. Unknown associations remain blank.
+- Preserve the PR reference when opening or refreshing a workflow's job detail, and show the same compact label immediately before the kind badge in the detail header. Existing workflow selection, job steps and timing behavior remain available.
+- Include each run's associated PR numbers in the agent endpoint's JSON and text reports, keeping the read-only report aligned with the visible board. Optional attribution failures leave workflow data available instead of hiding the repository's runs.
+- Stabilize continuous PR diff scrolling with measured native table rows, fixed document geometry and reusable visible cells. Wrapped lines keep their measured heights while scrolling, avoiding the shifting estimates that could make files appear to jump or repeat.
+- Keep file-tree jumps, repeated file clicks and resize anchoring aligned with the native viewport. Add enough trailing space for a short final file to reach the top, and retain selectable file headers, wrapped inline patches and permanent scrollbar gutters.
+- Add regression coverage for explicit and absent PR associations, exact merge and branch-head matching, duplicate numbers and multiple PRs. Native scrolling coverage checks stable geometry, row reuse, repeated jumps and resizing; advance the app version and build to 1.40.
+
 ## 1.39
 
 - Cache each PR's changed-file metadata, patches and parsed continuous diff document for the running app session. Reopening the same comparison immediately restores that data without another file download or parse.

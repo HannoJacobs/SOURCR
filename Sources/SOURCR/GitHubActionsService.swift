@@ -117,20 +117,50 @@ enum GitHubActionsService {
 
     static func listRuns(remote: GitHubRemote, repoID: UUID, limit: Int = 30, credential: GitHubCredential) async throws -> [ActionRun] {
         try Task.checkCancellation()
+        let pageSize = min(100, max(1, limit))
         let json = try await runGH([
-            "run", "list",
-            "--repo", remote.slug,
-            "--limit", "\(limit)",
-            "--json",
-            "databaseId,status,conclusion,displayTitle,name,headBranch,createdAt,startedAt,updatedAt,url,event,workflowName,attempt"
+            "api", "repos/\(remote.slug)/actions/runs?per_page=\(pageSize)"
         ], credential: credential)
 
         guard let data = json.data(using: .utf8) else {
             throw GitHubActionsError.invalidJSON("Empty run list")
         }
 
-        let rows = try JSONDecoder().decode([GHRunListRow].self, from: data)
-        return rows.map { $0.asActionRun(repoID: repoID) }
+        return try await resolveRunPullRequests(data: data, remote: remote, repoID: repoID, credential: credential)
+    }
+
+    /// Use explicit run associations first. Push/CD runs often omit them; for those,
+    /// accept only an associated PR whose merge commit, or matching branch head,
+    /// equals this run's SHA.
+    /// Branch names and title text cannot establish which PR produced a run.
+    static func resolveRunPullRequests(data: Data, remote: GitHubRemote, repoID: UUID,
+                                       credential: GitHubCredential) async throws -> [ActionRun] {
+        let rows = try JSONDecoder().decode(GHWorkflowRuns.self, from: data).workflow_runs
+        var runs = rows.map { $0.asActionRun(repoID: repoID) }
+        let shas = Array(Set(rows.filter { $0.pull_requests.isEmpty }.map(\.head_sha)))
+            .filter { $0.count == 40 && $0.allSatisfy(\.isHexDigit) }.sorted()
+        guard !shas.isEmpty else { return runs }
+        let fields = shas.enumerated().map { index, sha in
+            "c\(index): object(oid:\"\(sha)\"){ ... on Commit { associatedPullRequests(first:100){ nodes{ number merged mergeCommit{oid} headRefOid headRefName } } } }"
+        }.joined(separator: "\n")
+        let query = "query($owner:String!,$name:String!){repository(owner:$owner,name:$name){\(fields)}}"
+        do {
+            let json = try await runGH(["api", "graphql", "-f", "query=\(query)",
+                                        "-f", "owner=\(remote.owner)", "-f", "name=\(remote.name)"], credential: credential)
+            let response = try JSONDecoder().decode(GHRunCommitResponse.self, from: Data(json.utf8))
+            for (index, sha) in shas.enumerated() {
+                for rowIndex in rows.indices where rows[rowIndex].head_sha == sha && runs[rowIndex].pullRequestNumbers.isEmpty {
+                    runs[rowIndex].pullRequestNumbers = response.pullRequestNumbers(
+                        alias: "c\(index)", sha: sha, branch: runs[rowIndex].headBranch)
+                }
+            }
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            // Optional attribution must not hide otherwise healthy workflow data.
+            AppDiagnostics.error(.appState, "run PR attribution failed repo=\(remote.slug) error=\(error.localizedDescription)")
+        }
+        return runs
     }
 
     static func loadRunDetail(remote: GitHubRemote, run: ActionRun, credential: GitHubCredential) async throws -> ActionRunDetail {
@@ -147,7 +177,8 @@ enum GitHubActionsService {
         }
 
         let row = try JSONDecoder().decode(GHRunDetailRow.self, from: data)
-        let updated = row.asActionRun(repoID: run.repoID)
+        var updated = row.asActionRun(repoID: run.repoID)
+        updated.pullRequestNumbers = run.pullRequestNumbers
         let jobs = (row.jobs ?? []).map { $0.asActionJob() }
         return ActionRunDetail(run: updated, jobs: jobs)
     }
@@ -461,42 +492,61 @@ enum GitHubActionsService {
 
 // MARK: - gh JSON DTOs
 
-private struct GHRunListRow: Decodable {
-    let databaseId: Int
+struct GHWorkflowRuns: Decodable {
+    let workflow_runs: [GHWorkflowRun]
+}
+
+struct GHWorkflowRun: Decodable {
+    let id: Int
+    let name: String?
+    let display_title: String?
+    let head_branch: String?
+    let head_sha: String
+    let event: String
     let status: String
     let conclusion: String?
-    let displayTitle: String?
-    let name: String?
-    let headBranch: String?
-    let createdAt: String?
-    let startedAt: String?
-    let updatedAt: String?
-    let url: String?
-    let event: String?
-    let workflowName: String?
-    let attempt: Int?
+    let created_at: String?
+    let run_started_at: String?
+    let updated_at: String?
+    let html_url: String?
+    let run_attempt: Int?
+    let pull_requests: [PullRequest]
+
+    struct PullRequest: Decodable { let number: Int }
 
     func asActionRun(repoID: UUID) -> ActionRun {
-        let created = GitHubActionsService.parseDate(createdAt)
-        // Keep missing startedAt as distantPast so timing falls back to createdAt
-        // without pretending the attempt started at creation on a re-run.
-        let started = GitHubActionsService.parseDate(startedAt)
-        return ActionRun(
-            databaseId: databaseId,
-            repoID: repoID,
-            workflowName: workflowName ?? name ?? "Workflow",
-            displayTitle: displayTitle ?? name ?? "Workflow run",
-            headBranch: headBranch ?? "—",
-            event: event ?? "",
-            status: status,
-            conclusion: conclusion,
-            createdAt: created,
-            startedAt: started,
-            updatedAt: GitHubActionsService.parseDate(updatedAt),
-            url: url ?? "",
-            attempt: max(1, attempt ?? 1)
+        ActionRun(
+            databaseId: id, repoID: repoID,
+            workflowName: name ?? "Workflow", displayTitle: display_title ?? name ?? "Workflow run",
+            headBranch: head_branch ?? "—", event: event, status: status, conclusion: conclusion,
+            createdAt: GitHubActionsService.parseDate(created_at),
+            startedAt: GitHubActionsService.parseDate(run_started_at),
+            updatedAt: GitHubActionsService.parseDate(updated_at),
+            url: html_url ?? "", attempt: max(1, run_attempt ?? 1),
+            pullRequestNumbers: Array(Set(pull_requests.map(\.number).filter { $0 > 0 })).sorted()
         )
     }
+}
+
+struct GHRunCommitResponse: Decodable {
+    let data: ResponseData?
+    func pullRequestNumbers(alias: String, sha: String, branch: String) -> [Int] {
+        guard let commit = data?.repository?[alias] ?? nil else { return [] }
+        return Array(Set((commit.associatedPullRequests?.nodes ?? []).compactMap { $0 }
+            .filter { $0.number > 0 && (($0.merged && $0.mergeCommit?.oid == sha)
+                || ($0.headRefOid == sha && $0.headRefName == branch)) }.map(\.number))).sorted()
+    }
+    struct ResponseData: Decodable { let repository: [String: Commit?]? }
+    struct Commit: Decodable { let associatedPullRequests: Connection? }
+    struct Connection: Decodable { let nodes: [PullRequest?]? }
+    struct PullRequest: Decodable {
+        let number: Int
+        let merged: Bool
+        let mergeCommit: MergeCommit?
+        let headRefOid: String?
+        let headRefName: String?
+    }
+    struct MergeCommit: Decodable { let oid: String }
 }
 
 private struct GHRunDetailRow: Decodable {

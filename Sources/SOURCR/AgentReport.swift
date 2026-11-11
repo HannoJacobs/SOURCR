@@ -135,6 +135,7 @@ struct AgentReport: Codable, Sendable {
     }
 
     struct Run: Codable, Sendable {
+        var pullRequestNumbers: [Int] = []
         var id: Int
         var workflow: String
         var kind: String
@@ -379,6 +380,7 @@ enum AgentReportRenderer {
             for run in branch.runs {
                 var facts = ["[\(run.state)] \(run.workflow): \(run.title)", "run \(run.id)"]
                 if run.attempt > 1 { facts.append("attempt \(run.attempt)") }
+                if !run.pullRequestNumbers.isEmpty { facts.append("PR " + run.pullRequestNumbers.map { "#\($0)" }.joined(separator: ", ")) }
                 facts.append(run.event)
                 facts.append(GitHubActionsService.formatDuration(TimeInterval(run.elapsedSeconds)))
                 facts.append(run.url)

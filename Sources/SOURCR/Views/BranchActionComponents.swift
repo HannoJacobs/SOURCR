@@ -12,6 +12,7 @@ struct RunLine: View {
             HStack(spacing: 6) {
                 ActionStatusIcon(run: run)
                     .frame(width: 12, height: 12)
+                RunPullRequestLabel(run: run)
                 WorkflowBadge(kind: run.workflowKind)
                 Text(run.workflowName)
                     .font(.system(size: 11))
@@ -193,6 +194,20 @@ struct WorkflowBadge: View {
         case .cd: return Color.orange.opacity(0.16)
         case .ci: return Color.blue.opacity(0.14)
         case .other: return Color.primary.opacity(0.08)
+        }
+    }
+}
+
+struct RunPullRequestLabel: View {
+    let run: ActionRun
+
+    var body: some View {
+        if let label = run.pullRequestLabel {
+            Text(label)
+                .font(.system(size: 9))
+                .foregroundStyle(.secondary)
+                .fixedSize()
+                .help("Associated pull request" + (run.pullRequestNumbers.count == 1 ? "" : "s"))
         }
     }
 }

@@ -240,6 +240,12 @@ struct ActionRun: Identifiable, Hashable {
     let url: String
     /// 1 for the first attempt; increments on re-run.
     let attempt: Int
+    var pullRequestNumbers: [Int] = []
+
+    var pullRequestLabel: String? {
+        let numbers = Array(Set(pullRequestNumbers.filter { $0 > 0 })).sorted()
+        return numbers.isEmpty ? nil : "(" + numbers.map { "#\($0)" }.joined(separator: ", ") + ")"
+    }
 
     var workflowKind: ActionWorkflowKind {
         ActionWorkflowKind.classify(workflowName: workflowName)

@@ -444,6 +444,7 @@ final class AgentReportBuilder {
     private nonisolated static func makeRun(_ run: ActionRun, now: Date) -> AgentReport.Run {
         let state = run.isRunning ? "running" : run.isFailed ? "failed" : run.isPassed ? "passed" : run.isCancelled ? "cancelled" : "other"
         return AgentReport.Run(
+            pullRequestNumbers: run.pullRequestNumbers,
             id: run.databaseId, workflow: run.workflowName, kind: run.workflowKind.rawValue,
             title: run.displayTitle, event: run.event, state: state, status: run.status,
             conclusion: run.conclusion, attempt: run.attempt,

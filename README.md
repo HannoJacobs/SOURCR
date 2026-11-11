@@ -23,7 +23,7 @@ Menu bar icon
 - The mode selector uses icons in **Branches → Diff** order, with tooltips and accessible labels.
 - **Diff mode:** Shows combined staged + dirty changes and untracked files on the **current branch**
 - Click a file to open an adjoining diff (Inline or Side By Side); click again to collapse
-- **Workflow activity:** Running and failed workflows appear below their branch. Click anywhere on a branch row to show or hide its completed workflow results. Timers update live, and selecting a workflow opens its job and step detail.
+- **Workflow activity:** Running and failed workflows appear below their branch. Click anywhere on a branch row to show or hide its completed workflow results. A small light-grey PR reference such as `(#123)` appears immediately before its CI/CD/other badge when GitHub provides a confirmed run or exact-commit association. Timers update live, and selecting a workflow opens its job and step detail.
 - Add a GitHub repository with its GitHub URL, SSH origin, or `owner/repo` in Branches Settings; the header’s Add button opens that form
 - Existing Actions folder watches convert to saved GitHub links once; if a folder was already removed, use its pencil button in Branches Settings to set the link
 - Click a workflow run to expand job/step detail beside the list; click again to collapse
@@ -76,7 +76,7 @@ It is GET and HEAD only and cannot change anything. The port binds to loopback, 
 - No commit / push / pull
 - No rewrite of working tree state
 
-Read-only by design: `GitService` only allows `status`, `diff`, `show`, `rev-parse`, `ls-files`, and `remote get-url`. Workflow monitoring uses the `gh` CLI read-only (`run list` / `run view`); PR files use GET requests to GitHub’s files endpoint with the repository’s configured account. The agent endpoint serves GET and HEAD only.
+Read-only by design: `GitService` only allows `status`, `diff`, `show`, `rev-parse`, `ls-files`, and `remote get-url`. Workflow monitoring uses the `gh` CLI read-only (`api` / `run view`); PR files use GET requests to GitHub’s files endpoint with the repository’s configured account. The agent endpoint serves GET and HEAD only.
 
 ## Requirements
 
