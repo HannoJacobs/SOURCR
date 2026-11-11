@@ -2,17 +2,17 @@ import Testing
 @testable import SOURCR
 
 struct PRDiffDocumentTests {
-    @Test func nativeScrollTargetsKeepExactPathsAcrossRepeatedLineNumbers() {
+    @Test func documentRowsKeepExactPathsAcrossRepeatedLineNumbers() {
         let files = ["a/same.txt", "b/same.txt"].map {
             PullRequestFile(filename: $0, previousFilename: nil, status: "modified", additions: 1, deletions: 1,
                             patch: "@@ -1 +1 @@\n-old\n+new")
         }
         let rows = PRDiffDocumentRow.build(files: files)
-        #expect(Set(rows.map(\.scrollTarget)).count == rows.count)
+        #expect(Set(rows.map(\.id)).count == rows.count)
         for row in rows {
-            #expect(row.scrollTarget.path == row.filePath)
+            #expect(files.contains { $0.filename == row.filePath })
             if case .file(let file) = row {
-                #expect(row.scrollTarget == .file(file.filename))
+                #expect(row.id == PRDiffDocumentRow.fileID(file.filename))
             }
         }
     }

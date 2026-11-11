@@ -210,6 +210,7 @@ final class AppState {
     var pullRequestSidebarWidth: CGFloat = defaultPRSidebarWidth
     var selectedPullRequestFile: String?
     var pullRequestDocument: [PRDiffDocumentRow] = []
+    var pullRequestDocumentVersion = 0
     var pullRequestScrollRequest = 0
     var pullRequestScrollTarget: String?
     var isPRSizeDoubled = false
@@ -1145,6 +1146,7 @@ final class AppState {
     private func applyPullRequestSnapshot(_ snapshot: PullRequestDiffSnapshot) {
         pullRequestFiles = snapshot.files
         pullRequestDocument = snapshot.document
+        pullRequestDocumentVersion += 1
         pullRequestCacheRevision = snapshot.revision
         pullRequestError = nil
         isLoadingPullRequest = false
@@ -1195,6 +1197,7 @@ final class AppState {
         pullRequestSidebarWidth = Self.defaultPRSidebarWidth
         selectedPullRequestFile = nil
         pullRequestDocument = []
+        pullRequestDocumentVersion += 1
         pullRequestScrollRequest = 0
         pullRequestScrollTarget = nil
         customPRSize = nil

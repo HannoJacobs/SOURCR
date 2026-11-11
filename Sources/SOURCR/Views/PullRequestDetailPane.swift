@@ -5,7 +5,6 @@ struct PullRequestDetailPane: View {
     @Environment(AppState.self) private var appState
     @State private var sidebarDragStart: CGFloat?
     @State private var sidebarDividerHovered = false
-    @State private var scrollTracker = PRDiffScrollTracker()
     @State private var sidebarPosition: String?
     var resizeActions = PanelDragActions()
     private var treeRows: [PullRequestFileTree.Row] {
@@ -63,12 +62,6 @@ struct PullRequestDetailPane: View {
             }
         }
         .background(SCMTheme.diffBackground)
-        .onAppear {
-            let state = appState
-            scrollTracker.onVisibleFile = { [weak state] in state?.trackVisiblePullRequestFile($0) }
-            scrollTracker.start()
-        }
-        .onDisappear { scrollTracker.stop() }
         .onChange(of: appState.pullRequestFileFilter) { appState.collapsedPullRequestFolders = [] }
         .overlay(alignment: appState.pullRequestOpensRight ? .bottomTrailing : .bottomLeading) {
             PanelDragHandle(onBegan: resizeActions.began, onChanged: resizeActions.changed,
@@ -199,65 +192,11 @@ struct PullRequestDetailPane: View {
     }
 
     private var diffContent: some View {
-        GeometryReader { geometry in
-            ScrollViewReader { proxy in
-                ScrollView(.vertical) {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(appState.pullRequestDocument, id: \.scrollTarget) { row in
-                            VStack(alignment: .leading, spacing: 0) {
-                            switch row {
-                            case .file(let file):
-                                fileHeader(file)
-                            case .note(_, let text):
-                                Text(text).font(.caption).foregroundStyle(.secondary)
-                                    .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-                            case .line(_, let line):
-                                InlineDiffRow(line: line, wordWrap: true, containerWidth: geometry.size.width)
-                            }
-                            }
-                            .background(PRDiffRowMarker(path: row.filePath, tracker: scrollTracker))
-                        }
-                    }
-                    .scrollTargetLayout()
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.bottom, 28)
-                    .background(PRScrollbars())
-                }
-                .scrollIndicators(.visible)
-                .modifier(PRDiffScrollObservation(tracker: scrollTracker))
-                .background(PRDiffViewportMarker(tracker: scrollTracker))
-                .accessibilityLabel("All PR file diffs")
-                .onChange(of: appState.pullRequestScrollRequest) {
-                    if let path = appState.pullRequestScrollTarget {
-                        let target = PRDiffDocumentRow.ScrollTarget.file(path)
-                        proxy.scrollTo(target, anchor: .top)
-                        scrollTracker.scheduleUpdate()
-                    }
-                }
-            }
-        }
-    }
-
-    private func fileHeader(_ file: PullRequestFile) -> some View {
-        VStack(spacing: 0) {
-            Divider()
-            HStack(alignment: .top, spacing: 8) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(file.filename).font(.system(size: 11, design: .monospaced))
-                        .textSelection(.enabled)
-                    if let old = file.previousFilename {
-                        Text("Renamed from \(old)").font(.caption2).foregroundStyle(.secondary)
-                    }
-                }
-                Spacer(minLength: 0)
-                Text("+\(file.additions)").foregroundStyle(.green)
-                Text("−\(file.deletions)").foregroundStyle(.red)
-            }
-            .font(.caption).padding(10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(nsColor: .windowBackgroundColor))
-            Divider()
-        }
+        PRDiffScrollView(rows: appState.pullRequestDocument,
+                         documentVersion: appState.pullRequestDocumentVersion,
+                         scrollRequest: appState.pullRequestScrollRequest,
+                         scrollTarget: appState.pullRequestScrollTarget,
+                         onVisibleFile: { appState.trackVisiblePullRequestFile($0) })
     }
 
     private func message(_ text: String) -> some View {
