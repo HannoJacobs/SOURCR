@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.41
+
+- Recover a panel that AppKit still considers visible but that is absent from the current desktop. Clicking the menu bar item now checks the panel's active Space and occlusion state before deciding whether to hide it or bring it forward.
+- Keep the normal click-to-close behavior for a visible panel on the active Space. A panel that is fully obscured, on an inactive Space, or belongs to a hidden application instead takes the show path so the click can restore access.
+- Explicitly unhide and activate SOURCR when showing its panel. This gives the user's open or reopen request a foreground presentation step before the existing window ordering and keyboard-focus calls run.
+- Order an already-visible panel out before showing it again when it is on an inactive Space. This refreshes its presentation through AppKit while retaining the existing panel and its hosted interface.
+- Preserve the detached panel's saved position and the anchored panel's status-item placement. Screen clamping, panel sizing, pinning and detaching continue through the existing layout path when the panel is shown.
+- Extend panel-show diagnostics with its active-Space membership, occlusion flag and frame. These values supplement the existing mode and keyboard-focus details; immediate occlusion values may precede WindowServer's display update.
+- Verify the repaired local build through the installed application, a WindowServer onscreen-window query and a focus switch back to another app. The owner confirmed visibility; the precise earlier macOS display or Space transition remains unconfirmed.
+- Keep the application a read-only source-control viewer and retain the existing refresh behavior when showing the panel. Advance the app version and build to 1.41 for the Release package and its corresponding GitHub download.
+
 ## 1.40
 
 - Show a small light-grey PR reference such as `(#123)` immediately before each workflow's CI, CD or other kind badge. Keep the workflow name, elapsed time and status icon in their existing row, with the new reference sized to fit beside the badge.

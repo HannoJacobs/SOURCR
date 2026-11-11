@@ -15,6 +15,7 @@ Menu bar icon
 ## What it does
 
 - Lives in the menu bar (`LSUIElement`)
+- Clicking the menu icon recovers a hidden or fully obscured panel; a visible panel on the active Space toggles closed. Showing the panel unhides and activates SOURCR before bringing it forward.
 - Watch local git repositories for **Diff** and GitHub repositories for **Branches**, including workflow activity (separate GitHub list from Diff)
 - **Branches mode:** Pins the default branch first, then shows remote branches newest-commit first, ten per repository; **Show more** adds ten. Each row shows the branch name (truncated at the end) with a workflow pill and PR badge in fixed columns, and a GitHub-style behind | ahead graph against the default branch beneath them. Rows are separated by dividers. The link icon at the right of each repository header opens its All branches page on GitHub. Right-click a branch to open it on GitHub or **Hide until updated** to hide that commit locally; a changed branch head brings it back, including after relaunch. Branches whose PR is merged (purple) are hidden automatically; pushing a new commit to one brings it back.
 - **Workflow pill:** once every workflow on a branch has finished, one pill shows a green tick or red cross with the number of completed workflows. While anything is running the pill is hidden; each running workflow shows its own orange spinner beneath the branch. Repository headers show orange running / red failed counts or a green tick.

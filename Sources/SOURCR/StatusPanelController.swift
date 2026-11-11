@@ -113,7 +113,10 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
     }
 
     func toggle() {
-        if isVisible {
+        // isVisible also includes windows ordered into an inactive Space. A menu
+        // click must recover that panel rather than hide something the user can't see.
+        if let panel, panel.isVisible, panel.isOnActiveSpace,
+           panel.occlusionState.contains(.visible), !NSApp.isHidden {
             hide()
         } else {
             show()
@@ -139,6 +142,11 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
 
         applyWindowMode()
         applyFrame()
+        if panel.isVisible && !panel.isOnActiveSpace {
+            panel.orderOut(nil)
+        }
+        NSApp.unhide(nil)
+        NSApp.activate()
         panel.orderFrontRegardless()
         panel.makeKey()
         installOutsideClickMonitor()
@@ -148,7 +156,7 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
         appState.refreshVisibleSurfaces(forceDiff: true, forceBranches: true)
         AppDiagnostics.info(
             .lifecycle,
-            "panel shown expanded=\(appState.isExpanded) pinned=\(appState.isPanelPinned) detached=\(appState.isPanelDetached) key=\(panel.isKeyWindow)"
+            "panel shown expanded=\(appState.isExpanded) pinned=\(appState.isPanelPinned) detached=\(appState.isPanelDetached) key=\(panel.isKeyWindow) activeSpace=\(panel.isOnActiveSpace) occluded=\(!panel.occlusionState.contains(.visible)) frame=\(panel.frame)"
         )
     }
 
