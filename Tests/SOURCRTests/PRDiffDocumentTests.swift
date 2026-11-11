@@ -2,6 +2,38 @@ import Testing
 @testable import SOURCR
 
 struct PRDiffDocumentTests {
+    @Test func documentFollowsSidebarOrderInsteadOfGitHubPathOrder() {
+        let paths = [
+            "AGENTS.md", "changelog/CHANGELOG.md", "skills/cli-spawn/SKILL.md",
+            "skills/cli-spawn/references/codex.md", "skills/quorum-review/SKILL.md",
+            "skills/tool10.md", "skills/tool2.md"
+        ]
+        let expected = [
+            "changelog/CHANGELOG.md", "skills/cli-spawn/references/codex.md",
+            "skills/cli-spawn/SKILL.md", "skills/quorum-review/SKILL.md",
+            "skills/tool2.md", "skills/tool10.md", "AGENTS.md"
+        ]
+        for input in [paths, Array(paths.reversed())] {
+            let files = input.map {
+                PullRequestFile(filename: $0, previousFilename: nil, status: "modified", additions: 1, deletions: 1,
+                                patch: "@@ -1 +1 @@\n-old\n+new")
+            }
+            let rows = PRDiffDocumentRow.build(files: files)
+            let headers = rows.compactMap { row -> String? in
+                if case .file(let file) = row { return file.filename }; return nil
+            }
+            let sidebar = PullRequestFileTree.rows(paths: input, collapsed: [], filter: "")
+                .filter { !$0.isDirectory }.map(\.id)
+            #expect(headers == expected)
+            #expect(headers == sidebar)
+            #expect(Set(rows.map(\.id)).count == rows.count)
+            for path in expected {
+                let fileRows = rows.filter { $0.filePath == path }
+                #expect(fileRows.count == 4)
+            }
+        }
+    }
+
     @Test func documentRowsKeepExactPathsAcrossRepeatedLineNumbers() {
         let files = ["a/same.txt", "b/same.txt"].map {
             PullRequestFile(filename: $0, previousFilename: nil, status: "modified", additions: 1, deletions: 1,

@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.42
+
+- Match the top-to-bottom order of file sections in the continuous PR diff to the visible file tree. Reviewing files by scrolling now follows the same sequence as working down the sidebar instead of using GitHub’s response order.
+- Keep directories ahead of files at each level of the tree. A changed file inside a nested folder appears in the diff before a sibling file outside that folder, matching the navigation layout already shown in the sidebar.
+- Use the fully expanded file tree to construct the document rather than introducing a second path comparator. Both panes share the existing natural filename ordering, including numbered names such as tool2 before tool10.
+- Preserve the original changed-file payloads while reordering their sections. Full-path headers, parsed patch lines, unavailable-patch notes and stable file identifiers continue to refer to the same GitHub files.
+- Keep filtering and folder collapse scoped to navigation. They do not remove file sections from the continuous diff or change the underlying document order while a user searches or collapses the sidebar.
+- Preserve native diff scrolling and file jumps through the existing measured table. Clicking a file still uses its full-path anchor, while scrolling continues to update the selected tree row from the visible diff section.
+- Add regression coverage using the reported AGENTIC file paths, nested directories, root-level files and naturally sorted numeric names. Check forward and reversed API input, matching sidebar and document order, unique row identifiers and retained patch rows.
+- Advance the app version and build to 1.42 for the Release archive and DMG. Verify the installed application against the reported PR after packaging, and publish the current package through the existing GitHub release download path.
+
 ## 1.41
 
 - Recover a panel that AppKit still considers visible but that is absent from the current desktop. Clicking the menu bar item now checks the panel's active Space and occlusion state before deciding whether to hide it or bring it forward.
