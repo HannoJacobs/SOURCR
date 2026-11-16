@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.43
+
+- Reveal the full branch name after a one-second hover. The name remains shortened to fit its column in the branch list, while a separate tooltip provides the complete text without widening the row or moving the workflow and PR badges.
+- Keep branch-name hover tracking active while another application has focus. A detached or pinned SOURCR panel can show its branch names without requiring an initial click to activate the window.
+- Handle branch-name clicks in the native label and explicitly accept the first mouse click. Clicking a branch name once opens or closes its completed workflow results, including when SOURCR was left floating above another application.
+- Accept first clicks in the panel's hosting view and allow ordinary macOS help to appear while the app is inactive. These settings support the branch list's existing controls alongside the dedicated branch-name tooltip.
+- Open a pull request directly in the default browser on Command-click. The PR badge uses a Command-specific gesture so opening GitHub consumes that click and keeps the ordinary in-app review action separate.
+- Retain normal PR badge clicks for the native diff popover. Activate SOURCR and make the panel key before opening that transient view; keep the existing context menu available and include the Command-click shortcut in the badge's help.
+- Cancel pending branch-name tooltips on pointer exit, click, text replacement or view removal. Present the full name in a nonactivating, mouse-transparent child panel, wrapping long names and keeping its placement within the available display width.
+- Add native regression coverage for the one-second delay, exit cancellation and first-click behavior. Verify that a non-key panel has no tooltip before the delay, then shows the full name without taking keyboard focus; check that one branch-name click invokes its action once.
+
 ## 1.42
 
 - Match the top-to-bottom order of file sections in the continuous PR diff to the visible file tree. Reviewing files by scrolling now follows the same sequence as working down the sidebar instead of using GitHub’s response order.

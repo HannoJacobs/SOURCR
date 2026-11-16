@@ -264,11 +264,7 @@ private struct WatchedBranchRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(alignment: .center, spacing: 4) {
-                Text(branch.name)
-                    .font(.system(size: 12, weight: .medium))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .help(branch.name)
+                BranchNameTooltip(text: branch.name, onClick: onToggleCompleted)
 
                 if branch.isDefault {
                     Text("default")

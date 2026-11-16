@@ -102,6 +102,10 @@ struct PullRequestPill: View {
 
     var body: some View {
         Button {
+            // A transient popover needs focus even when its first click comes
+            // from a panel left floating above another app.
+            NSApp.activate()
+            anchor.view?.window?.makeKey()
             appState.openPullRequest(pullRequest, anchorView: anchor.view)
         } label: {
             HStack(spacing: 2) {
@@ -126,6 +130,14 @@ struct PullRequestPill: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(PressableButtonStyle())
+        .highPriorityGesture(
+            TapGesture().modifiers(.command).onEnded {
+                if let url = URL(string: pullRequest.url) {
+                    let opened = NSWorkspace.shared.open(url)
+                    AppDiagnostics.info(.lifecycle, "PR command-click openedGitHub=\(opened) url=\(url.absoluteString)")
+                }
+            }
+        )
         .onHover { isHovered = $0 }
         .contextMenu {
             Button("Open on GitHub") {
@@ -136,7 +148,7 @@ struct PullRequestPill: View {
         }
         .background(PRBadgeAnchor(reference: anchor))
         .accessibilityAddTraits(isSelected ? .isSelected : [])
-        .help("\(pullRequest.state.label) #\(pullRequest.number) — \(pullRequest.title)\nClick to review files in SOURCR")
+        .help("\(pullRequest.state.label) #\(pullRequest.number) — \(pullRequest.title)\nClick to review files in SOURCR · ⌘-click to open on GitHub")
     }
 }
 

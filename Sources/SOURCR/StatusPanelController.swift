@@ -8,6 +8,11 @@ final class SOURCRPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
+/// Rows and custom button styles should respond even after another app takes focus.
+final class PanelHostingView<Content: View>: NSHostingView<Content> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
 /// Menu-bar anchored panel. The list column stays fixed; the detail pane opens towards
 /// whichever side of the display has more room.
 ///
@@ -460,7 +465,7 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
 
         let size = NSSize(width: SOURCRLayout.scmWidth, height: appState.panelHeight)
         // Hosting view is the contentView, so it always fills the window exactly.
-        let hosting = NSHostingView(rootView: AnyView(root))
+        let hosting = PanelHostingView(rootView: AnyView(root))
         hosting.wantsLayer = true
         hosting.layer?.cornerRadius = 10
         hosting.layer?.masksToBounds = true
@@ -479,6 +484,7 @@ final class StatusPanelController: NSObject, NSWindowDelegate {
         p.isMovable = false
         p.isMovableByWindowBackground = false
         p.hidesOnDeactivate = false
+        p.allowsToolTipsWhenApplicationIsInactive = true
         p.isReleasedWhenClosed = false
         p.contentView = hosting
         p.delegate = self
