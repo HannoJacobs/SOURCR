@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.44
+
+- Add a rich HTML report at `/state.html`. Open the URL directly in a browser or pass the response body to a client that can render an inline HTML preview.
+- Accept `format=html` through the existing format query option. The HTML report observes the same repository filter, view, refresh mode, and source limits as the other formats.
+- Group watched GitHub repositories into accordions that use the panel's expansion state. Each expanded repository shows branch status, default branch, ahead and behind counts, and links for visible PR badges.
+- List running and failed workflows under their branches, with the elapsed time and links to GitHub. Expand workflow jobs and their steps for more detail, and open completed workflow history separately.
+- Show branches hidden by the panel under their own disclosure. Each hidden branch retains its recorded status and the reason it is hidden.
+- Show local changes and selected PR review files in expandable rows. When the report includes a patch or file contents, the file row opens to a scrollable source block and shows any truncation or availability note.
+- Build the document from the existing report snapshot. The HTML includes its own styles and uses browser disclosure controls, so it can render offline once fetched.
+- Escape repository and workflow text in HTML and link only to HTTPS GitHub destinations. The HTML response adds a restrictive content policy while the endpoint continues to use its loopback and request checks.
+
 ## 1.43
 
 - Reveal the full branch name after a one-second hover. The name remains shortened to fit its column in the branch list, while a separate tooltip provides the complete text without widening the row or moving the workflow and PR badges.

@@ -188,12 +188,14 @@ enum AgentReportFormat: String, Sendable {
     case text
     case markdown = "md"
     case json
+    case html
 
     var contentType: String {
         switch self {
         case .text: return "text/plain; charset=utf-8"
         case .markdown: return "text/markdown; charset=utf-8"
         case .json: return "application/json; charset=utf-8"
+        case .html: return "text/html; charset=utf-8"
         }
     }
 }
@@ -208,6 +210,8 @@ enum AgentReportRenderer {
             return String(decoding: data, as: UTF8.self) + "\n"
         case .text, .markdown:
             return Document(markdown: format == .markdown).render(report)
+        case .html:
+            return AgentReportHTML.render(report)
         }
     }
 

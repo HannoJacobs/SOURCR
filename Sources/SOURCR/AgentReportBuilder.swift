@@ -41,7 +41,7 @@ struct AgentReportOptions: Equatable, Sendable {
         if let format = formatFromPath { options.format = format }
         if let raw = query["format"] {
             guard let format = AgentReportFormat(rawValue: raw == "markdown" ? "md" : raw) else {
-                return .failure(.init(message: "format must be text, md or json"))
+                return .failure(.init(message: "format must be text, md, json or html"))
             }
             options.format = format
         }

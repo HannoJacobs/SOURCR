@@ -51,11 +51,14 @@ While SOURCR runs, any agent on this Mac can read everything the app knows, when
 curl -s http://127.0.0.1:47615/state                 # plain text
 curl -s http://127.0.0.1:47615/state.md              # Markdown
 curl -s http://127.0.0.1:47615/state.json            # JSON, every field
+open 'http://127.0.0.1:47615/state.html?view=branches' # rich report in your browser
 curl -s http://127.0.0.1:47615/help                  # usage, for the agent itself
 ssh mac curl -s http://127.0.0.1:47615/state         # from devbox
 ```
 
 The report opens with a summary of what needs attention, then covers each watched Diff repository (branch, head, changed and untracked files, full diffs and untracked file contents), each watched GitHub repository (every branch with divergence, PR, check state and workflow runs, with jobs and steps for running and failed runs) and the panel's own state, including the selected PR review and its loaded file patches. Branches the panel hides stay listed, marked merged or hidden until updated. Unlike the panel, the report does not page branches ten at a time; like the panel, its runs come from each repository's newest 50.
+
+The HTML format groups branches into repository accordions and shows active workflows, elapsed times, and current job steps. Expand rows for workflow history, jobs, steps, and file patches. To show it inline in a client that supports HTML previews, fetch the HTML body and pass it to the client's renderer. The document includes its own styles and disclosure controls.
 
 | Option | Effect |
 |---|---|
@@ -64,11 +67,11 @@ The report opens with a summary of what needs attention, then covers each watche
 | `diffs=0` | File lists without diffs or contents |
 | `refresh=live\|cached\|force` | `live` (default): GitHub data at most 10s old, branch metadata at most 45s. `cached`: never contact GitHub. `force`: fetch everything now |
 | `full=1` | Lift the size limits (200 KB per file; 2 MB, 300 files and 30s of git per repository; 25 run details) and add jobs for every run |
-| `format=text\|md\|json` | Alternative to the path suffix |
+| `format=text\|md\|json\|html` | Alternative to the path suffix |
 
 Local git state is always read live. A truncated or omitted file says so in a `Note:` line, and failures appear in the report rather than failing the request. A narrowed report states its scope, and its summary covers only that scope. HTTP 503 means four requests are already running; 504 means one took over three minutes.
 
-It is GET and HEAD only and cannot change anything. The port binds to loopback, so other machines cannot reach it directly; requests from web pages are refused by checking `Host`, `Origin` and `Sec-Fetch-Site`, so a browser tab cannot read your source. Git runs with your global ignore rules and without taking `.git/index.lock`, so ignored secrets stay out and polling cannot fail a concurrent commit. There is no token: any process running on this Mac can read uncommitted changes in your Diff repositories, including a secrets file that no ignore rule covers. Settings shows the URL, and a red message if another process holds the port.
+It is GET and HEAD only and cannot change anything. The port binds to loopback, so other machines cannot reach it directly. You can navigate to the URL directly. The `Host`, `Origin` and `Sec-Fetch-Site` checks block requests from other websites. Git runs with your global ignore rules and without taking `.git/index.lock`, so ignored secrets stay out and polling cannot fail a concurrent commit. There is no token: any process running on this Mac can read uncommitted changes in your Diff repositories, including a secrets file that no ignore rule covers. Settings shows the URL, and a red message if another process holds the port.
 
 ## What it never does
 

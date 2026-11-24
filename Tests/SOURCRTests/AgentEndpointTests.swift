@@ -66,6 +66,8 @@ final class AgentReportOptionsTests: XCTestCase {
         XCTAssertEqual(try AgentReportOptions.parse(query: [:], formatFromPath: .markdown).get().format, .markdown)
         XCTAssertEqual(try AgentReportOptions.parse(query: ["format": "json"], formatFromPath: .markdown).get().format, .json)
         XCTAssertEqual(try AgentReportOptions.parse(query: ["format": "markdown"]).get().format, .markdown)
+        XCTAssertEqual(try AgentReportOptions.parse(query: ["format": "html"]).get().format, .html)
+        XCTAssertEqual(AgentReportFormat.html.contentType, "text/html; charset=utf-8")
     }
 
     func testMisspelledValuesFailInsteadOfBeingIgnored() {
@@ -418,6 +420,53 @@ final class AgentReportRendererTests: XCTestCase {
         let decoded = try JSONDecoder().decode(AgentReport.self, from: Data(json.utf8))
         XCTAssertEqual(decoded.diffRepos?.first?.changes.first?.diff, "+hi")
         XCTAssertNil(decoded.githubRepos)
+    }
+
+    func testHTMLDisplaysRepositoryTextAndDiffLiterally() {
+        let file = AgentReport.File(path: #"notes & "draft".txt"#, status: "modified",
+                                    diff: "+<strong>example</strong>\n", note: "2 < 3")
+        let html = AgentReportRenderer.render(report(file: file), as: .html)
+        XCTAssertTrue(html.hasPrefix("<!doctype html>"))
+        XCTAssertTrue(html.contains("<details class=\"repo\" open>"))
+        XCTAssertTrue(html.contains("notes &amp; &quot;draft&quot;.txt"))
+        XCTAssertTrue(html.contains("<pre><code>+&lt;strong&gt;example&lt;/strong&gt;\n</code></pre>"))
+        XCTAssertTrue(html.contains("2 &lt; 3"))
+        XCTAssertFalse(html.contains("<strong>example</strong>"))
+        XCTAssertFalse(html.contains("<h2>Branches</h2>"))
+    }
+
+    func testHTMLShowsBranchDivergenceActiveStepsAndCompletedHistory() {
+        let step = AgentReport.Step(number: 1, name: "Validate & build", status: "in_progress", elapsedSeconds: 2)
+        let job = AgentReport.Job(name: "Check", status: "in_progress", conclusion: "", steps: [step])
+        let run = AgentReport.Run(id: 1, workflow: "CI", kind: "ci", title: "Build", event: "push",
+                                  state: "running", status: "in_progress", attempt: 1, elapsedSeconds: 65,
+                                  url: "https://github.com/owner/project/actions/runs/1", jobs: [job])
+        var completed = run
+        completed.id = 2
+        completed.state = "passed"
+        completed.jobs = nil
+        let pr = AgentReport.PullRequest(number: 5, title: "Build & test", url: "https://github.com/owner/project/pull/5",
+                                        state: "open", badgeHidden: false)
+        let active = AgentReport.Branch(name: "feature/check", isDefault: false, ahead: 2, behind: 1,
+                                       checks: "running", pullRequest: pr, runs: [run, completed])
+        var hidden = active
+        hidden.name = "feature/old"
+        hidden.hiddenReason = "merged"
+        hidden.runs = []
+        var snapshot = report(file: .init(path: "unused", status: "modified"))
+        snapshot.diffRepos = nil
+        snapshot.githubRepos = [.init(name: "Project", collapsedInPanel: true, removedRunIDs: [], branches: [active, hidden])]
+        let html = AgentReportRenderer.render(snapshot, as: .html)
+        XCTAssertTrue(html.contains("<details class=\"repo\"><summary>"))
+        XCTAssertTrue(html.contains("1 behind, 2 ahead"))
+        XCTAssertTrue(html.contains("Build &amp; test"))
+        XCTAssertTrue(html.contains("https://github.com/owner/project/pull/5"))
+        XCTAssertTrue(html.contains("1m 05s"))
+        XCTAssertTrue(html.contains("<div class=\"current\">Validate &amp; build</div>"))
+        XCTAssertTrue(html.contains("<details class=\"jobs\"><summary>1 job</summary>"))
+        XCTAssertTrue(html.contains("<details class=\"history\"><summary>1 completed run</summary>"))
+        XCTAssertTrue(html.contains("<details class=\"hidden\"><summary>1 hidden branch</summary>"))
+        XCTAssertFalse(html.contains("<h2>Diff</h2>"))
     }
 }
 

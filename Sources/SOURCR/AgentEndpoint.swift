@@ -66,6 +66,8 @@ final class AgentEndpoint {
             return await state(request, format: .markdown)
         case "/state.json":
             return await state(request, format: .json)
+        case "/state.html":
+            return await state(request, format: .html)
         default:
             return .text("Unknown path \(request.path).\n\n\(Self.helpText)", status: 404)
         }
@@ -81,17 +83,22 @@ final class AgentEndpoint {
             let body = await Task.detached(priority: .utility) {
                 AgentReportRenderer.render(report, as: options.format)
             }.value
-            return .text(body, contentType: options.format.contentType)
+            let headers = options.format == .html
+                ? ["Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'",
+                   "Referrer-Policy": "no-referrer"]
+                : [:]
+            return .text(body, contentType: options.format.contentType, extraHeaders: headers)
         }
     }
 
     static let helpText = """
-    SOURCR agent endpoint: everything the SOURCR menu-bar app shows, as text.
+    SOURCR agent endpoint: the state of the SOURCR menu-bar app.
     Read-only, this Mac only. SOURCR must be running.
 
     GET /state        Plain text report (same as /state.txt)
     GET /state.md     Markdown report
     GET /state.json   JSON report, with every field
+    GET /state.html   Interactive HTML report for browsers and inline previews
     GET /health       Liveness and version
     GET /help         This text
 
@@ -108,7 +115,7 @@ final class AgentEndpoint {
       full=1                      Lift the size limits (200 KB per file, 2 MB and 300 files per
                                   repository, 25 run details, 30s of git per repository) and add
                                   jobs for every run.
-      format=text|md|json         Alternative to the path suffix.
+      format=text|md|json|html    Alternative to the path suffix.
 
     Local git state is always read live. Truncated or omitted source says so in a Note line.
     A request that takes over 3 minutes gets HTTP 504; 503 means four are already running.
@@ -118,6 +125,7 @@ final class AgentEndpoint {
       curl -s \(baseURL)/state
       curl -s '\(baseURL)/state.md?repo=SOURCR&view=diff'
       curl -s '\(baseURL)/state.json?view=branches&refresh=cached'
+      curl -s '\(baseURL)/state.html?view=branches'
     From devbox:
       ssh mac curl -s \(baseURL)/state
 
